@@ -1,0 +1,93 @@
+.gitignore
+  s_5f88545ae2699e::t_55b0f48af9cf41 1-3
+README.md
+  s_5f88545ae2699e::t_d124f3d686e3a7 1-152
+acceptance/black-box.js
+  s_5f88545ae2699e::t_3660dae5418006 1-113
+bin/wikiskill
+  s_5f88545ae2699e::t_b3f7f0b5facd06 1-3
+fixtures/basic-flywheel/README.md
+  s_5f88545ae2699e::t_5e62c878e212f2 1-23
+fixtures/basic-flywheel/adapters/adapter.cjs
+  s_5f88545ae2699e::t_3ea6d7e8c7a291 1-13
+fixtures/basic-flywheel/adapters/maintainer.cjs
+  s_5f88545ae2699e::t_43577d248573c3 1-6
+fixtures/basic-flywheel/adapters/proposer.cjs
+  s_5f88545ae2699e::t_6160fc82e6da62 1-14
+fixtures/basic-flywheel/adapters/runner.cjs
+  s_5f88545ae2699e::t_0550b68a208fb9 1-13
+fixtures/basic-flywheel/dataset.json
+  s_5f88545ae2699e::t_633aad5dd621bf 1-14
+fixtures/basic-flywheel/evolution-config.json
+  s_5f88545ae2699e::t_8855130fd6fab9 1-9
+fixtures/basic-flywheel/skill/SKILL.md
+  s_5f88545ae2699e::t_68892a6b9d051d 1-6
+package.json
+  s_5f88545ae2699e::t_2c8e610c7b5e47 1-23
+src/claude-learning.js
+  s_5f88545ae2699e::t_2e630be7ba2c3c 1-123
+src/claude-runner.js
+  s_5f88545ae2699e::t_e44d7d96c6999d 1-95
+src/cli.js
+  s_5f88545ae2699e::t_2bcee01ee58351 1-155
+src/codex-learning.js
+  s_5f88545ae2699e::t_a51ba4e3f9e0eb 1-212
+src/codex-runner.js
+  s_5f88545ae2699e::t_178fd568327faf 1-230
+src/command-runner.js
+  s_5f88545ae2699e::t_c40c7bef134d86 1-83
+src/command-scorer.js
+  s_5f88545ae2699e::t_77879e82d3b75a 1-126
+src/evolution.js
+  s_5f88545ae2699e::t_fbd7d274b183ac 1-412
+src/index.js
+  s_5f88545ae2699e::t_b938f18b243167 1-1287
+src/prompt-contract.js
+  s_5f88545ae2699e::t_a5152b74d3c52f 1-17
+src/publishing.js
+  s_5f88545ae2699e::t_3e58b2b7650b11 1-202
+src/runtime-capabilities.js
+  s_5f88545ae2699e::t_ae5e9f5fbb18b2 1-148
+src/workspace.js
+  s_5f88545ae2699e::t_7012e7d2929c4a 1-203
+test/claude-learning.test.js
+  s_5f88545ae2699e::t_3c88234975114e 1-64
+test/claude-runner.test.js
+  s_5f88545ae2699e::t_71b1378a6504d3 1-69
+test/codex-learning.test.js
+  s_5f88545ae2699e::t_ab5d067f64a752 1-113
+test/codex-runner.test.js
+  s_5f88545ae2699e::t_de239c72dc1090 1-383
+test/command-scorer.test.js
+  s_5f88545ae2699e::t_fb04d70ab1e3b2 1-63
+test/core.test.js
+  s_5f88545ae2699e::t_4630a428be8e68 1-685
+test/evolution.test.js
+  s_5f88545ae2699e::t_00a56aee633411 1-352
+test/noop-proposer.cjs
+  s_5f88545ae2699e::t_cf59b539610d68 1-7
+test/prompt-contract.test.js
+  s_5f88545ae2699e::t_771f27909def51 1-23
+test/publishing.test.js
+  s_5f88545ae2699e::t_d33513589d9929 1-82
+test/runtime-capabilities.test.js
+  s_5f88545ae2699e::t_8ee76bece104f8 1-61
+test/workspace.test.js
+  s_5f88545ae2699e::t_46e4642af5d71d 1-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "281b63a7c0024540f1a1e8874a1acbe7feb7b82d",
+  "prompts": {},
+  "sessions": {
+    "s_5f88545ae2699e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a06cfa-6664-7792-93d6-ee615a21bf41",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}

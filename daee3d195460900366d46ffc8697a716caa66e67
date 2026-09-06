@@ -1,0 +1,37 @@
+README.md
+  s_5f88545ae2699e::t_505beb5e13083c 3-4,6-7,9,11-13,15,18-20,24-26,28,30,32-34,36,38-45,47-49,51-80,107-111,118,120,122,129-130,136-139,141,143,146-149,152-167
+acceptance/black-box.js
+  s_5f88545ae2699e::t_28dfc7f25d9d02 74-76,81-83,91-93,105-106
+fixtures/basic-flywheel/README.md
+  s_5f88545ae2699e::t_b944316040451d 1,3-4,6,8-14,16,22-23
+fixtures/basic-flywheel/adapters/maintainer.cjs
+  s_5f88545ae2699e::t_d0acf4a9ed5bb3 3-7
+fixtures/basic-flywheel/adapters/proposer.cjs
+  s_5f88545ae2699e::t_b8098b204a00bd 3,5-19,25
+fixtures/basic-flywheel/adapters/runner.cjs
+  s_5f88545ae2699e::t_9c4591e4f17b60 3-7,9,12-13
+fixtures/basic-flywheel/dataset.json
+  s_5f88545ae2699e::t_67909b02f6e183 5-12
+fixtures/basic-flywheel/evolution-config.json
+  s_5f88545ae2699e::t_0dfb3082f2e04e 8
+fixtures/basic-flywheel/skill/SKILL.md
+  s_5f88545ae2699e::t_470748a2c182b2 3,6-9
+test/workspace.test.js
+  s_5f88545ae2699e::t_5ae0dd3377d092 117-118,125-126
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "daee3d195460900366d46ffc8697a716caa66e67",
+  "prompts": {},
+  "sessions": {
+    "s_5f88545ae2699e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a06cfa-6664-7792-93d6-ee615a21bf41",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}

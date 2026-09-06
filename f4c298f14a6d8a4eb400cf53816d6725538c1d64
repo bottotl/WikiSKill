@@ -1,0 +1,19 @@
+README.md
+  s_5f88545ae2699e::t_f7b627ef4e082e 3-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "f4c298f14a6d8a4eb400cf53816d6725538c1d64",
+  "prompts": {},
+  "sessions": {
+    "s_5f88545ae2699e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a06cfa-6664-7792-93d6-ee615a21bf41",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
