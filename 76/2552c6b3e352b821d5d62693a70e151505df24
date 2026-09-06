@@ -1,0 +1,19 @@
+README.md
+  s_046c1d5f6dbc3e::t_6d4de77da1f467 36-48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "762552c6b3e352b821d5d62693a70e151505df24",
+  "prompts": {},
+  "sessions": {
+    "s_046c1d5f6dbc3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0768e-f622-7aa3-972d-cc4b789bb87e",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "於林涛 <yulintao3@jd.com>"
+    }
+  }
+}
