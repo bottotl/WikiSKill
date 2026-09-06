@@ -1,0 +1,78 @@
+{
+  "schema": "wikiskill.dataset.v1",
+  "domain": "execctl-v2-cli-config-migration",
+  "tasks": [
+    {
+      "id": "train-billing-worker",
+      "split": "train",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "billing-worker" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"billing-worker\",\n  \"args\": [\"--region\", \"cn-north-1\"],\n  \"env\": { \"LOG_LEVEL\": \"info\" },\n  \"labels\": { \"team\": \"billing\" },\n  \"retries\": 3\n}\n", "RUNBOOK.md": "# execctl v2 migration\n\nSet `command` to `execctl`. Replace `args` with `run`, `--format=json`, `--`, then the original command and every original argument in order. Preserve all unrelated fields and existing environment entries, and add `EXECCTL_NONINTERACTIVE` with the string value `1`.\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','billing-worker','--region','cn-north-1'],env:{LOG_LEVEL:'info',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'billing'},retries:3});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "train-catalog-sync",
+      "split": "train",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "catalog-sync" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"catalog-sync\",\n  \"args\": [\"--full\", \"--batch-size\", \"250\"],\n  \"env\": { \"LOG_LEVEL\": \"warn\", \"CACHE\": \"0\" },\n  \"labels\": { \"team\": \"catalog\", \"tier\": \"batch\" },\n  \"retries\": 1\n}\n", "RUNBOOK.md": "# execctl v2 migration\n\nSet `command` to `execctl`. Replace `args` with `run`, `--format=json`, `--`, then the original command and every original argument in order. Preserve all unrelated fields and existing environment entries, and add `EXECCTL_NONINTERACTIVE` with the string value `1`.\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','catalog-sync','--full','--batch-size','250'],env:{LOG_LEVEL:'warn',CACHE:'0',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'catalog',tier:'batch'},retries:1});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "train-notification-dispatch",
+      "split": "train",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "notification-dispatch" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"notification-dispatch\",\n  \"args\": [\"--channel\", \"email\", \"--limit\", \"50\"],\n  \"env\": {},\n  \"labels\": { \"team\": \"messaging\" },\n  \"retries\": 5\n}\n", "RUNBOOK.md": "# execctl v2 migration\n\nSet `command` to `execctl`. Replace `args` with `run`, `--format=json`, `--`, then the original command and every original argument in order. Preserve all unrelated fields and existing environment entries, and add `EXECCTL_NONINTERACTIVE` with the string value `1`.\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','notification-dispatch','--channel','email','--limit','50'],env:{EXECCTL_NONINTERACTIVE:'1'},labels:{team:'messaging'},retries:5});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "train-report-export",
+      "split": "train",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "report-export" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"report-export\",\n  \"args\": [\"--format\", \"csv\", \"--date\", \"2026-09-01\"],\n  \"env\": { \"TZ\": \"UTC\" },\n  \"labels\": { \"team\": \"reporting\", \"retention\": \"30d\" },\n  \"retries\": 2\n}\n", "RUNBOOK.md": "# execctl v2 migration\n\nSet `command` to `execctl`. Replace `args` with `run`, `--format=json`, `--`, then the original command and every original argument in order. Preserve all unrelated fields and existing environment entries, and add `EXECCTL_NONINTERACTIVE` with the string value `1`.\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','report-export','--format','csv','--date','2026-09-01'],env:{TZ:'UTC',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'reporting',retention:'30d'},retries:2});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "val-search-index",
+      "split": "val",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "search-index" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"search-index\",\n  \"args\": [\"--shard\", \"7\"],\n  \"env\": { \"LOG_LEVEL\": \"debug\" },\n  \"labels\": { \"team\": \"search\" },\n  \"retries\": 4\n}\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','search-index','--shard','7'],env:{LOG_LEVEL:'debug',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'search'},retries:4});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "val-ledger-close",
+      "split": "val",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "ledger-close" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"ledger-close\",\n  \"args\": [\"--month\", \"2026-08\", \"--strict\"],\n  \"env\": { \"TZ\": \"Asia/Shanghai\", \"AUDIT\": \"true\" },\n  \"labels\": { \"team\": \"ledger\", \"critical\": true },\n  \"retries\": 0\n}\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','ledger-close','--month','2026-08','--strict'],env:{TZ:'Asia/Shanghai',AUDIT:'true',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'ledger',critical:true},retries:0});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "test-inventory-reconcile",
+      "split": "test",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "inventory-reconcile" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"inventory-reconcile\",\n  \"args\": [\"--warehouse\", \"w-17\", \"--dry-run\"],\n  \"env\": { \"CACHE\": \"1\" },\n  \"labels\": { \"team\": \"inventory\" },\n  \"retries\": 6\n}\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','inventory-reconcile','--warehouse','w-17','--dry-run'],env:{CACHE:'1',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'inventory'},retries:6});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    },
+    {
+      "id": "test-profile-refresh",
+      "split": "test",
+      "input": { "instruction": "Migrate config/execctl.json to execctl v2. Preserve the source command intent and unrelated configuration. Edit no other file, then return a short summary.", "service": "profile-refresh" },
+      "outputSchema": { "type": "object", "additionalProperties": false, "required": ["summary"], "properties": { "summary": { "type": "string" } } },
+      "sandbox": { "config/execctl.json": "{\n  \"command\": \"profile-refresh\",\n  \"args\": [\"--segment\", \"new-users\"],\n  \"env\": { \"LOG_LEVEL\": \"error\", \"REGION\": \"us-east-1\" },\n  \"labels\": { \"team\": \"profile\", \"priority\": \"low\" },\n  \"retries\": 2\n}\n" },
+      "groundTruth": { "schema": "wikiskill.scorer.command-exit.v1", "command": ["node", "-e", "const fs=require('node:fs');const a=require('node:assert/strict');const c=JSON.parse(fs.readFileSync('config/execctl.json','utf8'));a.deepStrictEqual(c,{command:'execctl',args:['run','--format=json','--','profile-refresh','--segment','new-users'],env:{LOG_LEVEL:'error',REGION:'us-east-1',EXECCTL_NONINTERACTIVE:'1'},labels:{team:'profile',priority:'low'},retries:2});"], "allowedPaths": ["config/execctl.json"] },
+      "evaluator": { "capabilityRef": "builtin:command-exit-v1" }
+    }
+  ]
+}

@@ -6,6 +6,7 @@
   "files": [
     "acceptance",
     "bin",
+    "examples",
     "fixtures",
     "src",
     "README.md"
@@ -15,6 +16,8 @@
   },
   "scripts": {
     "acceptance": "node acceptance/black-box.js",
+    "demo:check": "node examples/cli-config-evolution/scripts/run-live.cjs --dry-run",
+    "demo:live": "node examples/cli-config-evolution/scripts/run-live.cjs",
     "test": "node --test test/*.test.js"
   },
   "engines": {

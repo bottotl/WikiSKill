@@ -119,6 +119,21 @@ wikiskill bootstrap uninstall --workspace <repo> --command "jft0m workspace harn
 `@AGENTS.md` 引用。`uninstall` 发现受管区块被人工修改时会停止，避免覆盖用户
 规则。
 
+## 真实 Codex Demo
+
+`examples/cli-config-evolution/` 提供一个真实 Codex 的 CLI 配置迁移实验。
+它用 4 个 training、2 个 validation 和 2 个 test task 演化内置
+`execctl-v2` Skill；所有可变状态和已应用候选保留在被忽略的 demo artifact
+目录中，提交的 seed Skill 不会被修改。
+
+```sh
+npm run demo:check
+npm run demo:live -- --model gpt-5.6-terra
+```
+
+真实运行会调用模型；当没有获得严格的 validation 和 test 提升时，命令会以
+非零状态退出，但会保留完整证据供检查。
+
 ## Dataset 合同
 
 最短复现路径使用显式 `wikiskill.dataset.v1` 文件。每个 task 声明 split、
