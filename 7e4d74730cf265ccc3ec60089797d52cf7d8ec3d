@@ -1,0 +1,39 @@
+test/cli-config-demo.test.js
+  s_9b19a881fe7a44::t_d266ab70ec5d41 1-42,44-75
+  s_9b19a881fe7a44::t_56796abfe23200 43
+examples/cli-config-evolution/.gitignore
+  s_9b19a881fe7a44::t_869a1bce3e1386 1
+examples/cli-config-evolution/scripts/run-live.cjs
+  s_9b19a881fe7a44::t_9faf17c901b5c2 4,52,146
+  s_9b19a881fe7a44::t_795e94a2a92c5a 74
+  s_9b19a881fe7a44::t_d266ab70ec5d41 1-3,5-51,53-73,75-145,147-160
+examples/cli-config-evolution/skills/execctl-v2/SKILL.md
+  s_9b19a881fe7a44::t_56796abfe23200 6-7
+  s_9b19a881fe7a44::t_869a1bce3e1386 1-5,8-12
+examples/cli-config-evolution/dataset.json
+  s_9b19a881fe7a44::t_869a1bce3e1386 1-9,11-18,20-27,29-36,38-78
+  s_9b19a881fe7a44::t_56796abfe23200 10,19,28,37
+README.md
+  s_9b19a881fe7a44::t_9faf17c901b5c2 90-104
+package.json
+  s_9b19a881fe7a44::t_869a1bce3e1386 9,19-20
+examples/cli-config-evolution/README.md
+  s_9b19a881fe7a44::t_56796abfe23200 6-7
+  s_9b19a881fe7a44::t_869a1bce3e1386 1-5,8-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "7e4d74730cf265ccc3ec60089797d52cf7d8ec3d",
+  "prompts": {},
+  "sessions": {
+    "s_9b19a881fe7a44": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07685-7d1e-73c0-820b-3734e4e7582c",
+        "model": "gpt-5.6-terra"
+      },
+      "human_author": "於林涛 <yulintao3@jd.com>"
+    }
+  }
+}
