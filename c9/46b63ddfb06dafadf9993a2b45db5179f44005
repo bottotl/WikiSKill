@@ -1,0 +1,28 @@
+src/index.js
+  s_5f88545ae2699e::t_355ecd0ea575d8 13,1288
+test/context.test.js
+  s_5f88545ae2699e::t_355ecd0ea575d8 1-56
+src/context.js
+  s_5f88545ae2699e::t_355ecd0ea575d8 1-127
+README.md
+  s_5f88545ae2699e::t_b9ef78c6d98798 90-104,192-194
+src/cli.js
+  s_5f88545ae2699e::t_7281af7058a4e2 39-41
+  s_5f88545ae2699e::t_355ecd0ea575d8 10-12,22-23,125-129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c946b63ddfb06dafadf9993a2b45db5179f44005",
+  "prompts": {},
+  "sessions": {
+    "s_5f88545ae2699e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a06cfa-6664-7792-93d6-ee615a21bf41",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
