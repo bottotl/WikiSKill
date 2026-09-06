@@ -1,0 +1,127 @@
+"use strict";
+
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+
+const { execute } = require("../src/cli");
+const { BOOTSTRAP, doctorWorkspace, initWorkspace, uninstallWorkspace } = require("../src/workspace");
+
+const temporaryWorkspace = () => fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-workspace-"));
+
+test("init dry-run reports changes without writing", async () => {
+  const workspace = await temporaryWorkspace();
+  await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Existing rules\n");
+  const before = await fs.readdir(workspace);
+  const result = await initWorkspace(workspace, { dryRun: true });
+  assert.deepEqual(await fs.readdir(workspace), before);
+  assert.match(result.changes.find((change) => change.path === "AGENTS.md").diff, /Existing rules[\s\S]*wikiskill-bootstrap:start/u);
+  assert.equal(result.changes.some((change) => change.path === ".wikiskill/config.json"), true);
+});
+
+test("init creates only the minimal workspace and preserves Provider rules", async () => {
+  const workspace = await temporaryWorkspace();
+  await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Owner rules\n");
+  await fs.writeFile(path.join(workspace, "CLAUDE.md"), "# Claude rules\n");
+  await initWorkspace(workspace);
+  const config = JSON.parse(await fs.readFile(path.join(workspace, ".wikiskill/config.json"), "utf8"));
+  assert.equal(config.liveSkillsPath, ".wikiskill/skills");
+  assert.equal(config.bootstrapMode, "direct");
+  assert.deepEqual(await fs.readdir(path.join(workspace, ".wikiskill")), [".gitignore", "candidates", "config.json", "raw", "receipts", "runtime", "skills", "wiki"]);
+  assert.deepEqual(await fs.readdir(path.join(workspace, ".wikiskill", "raw")), []);
+  assert.match(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), /# Owner rules[\s\S]*wikiskill evolve --dataset/u);
+  assert.equal(await fs.readFile(path.join(workspace, "CLAUDE.md"), "utf8"), "# Claude rules\n\n@AGENTS.md\n");
+  assert.deepEqual((await initWorkspace(workspace)).changes, []);
+  assert.deepEqual((await doctorWorkspace(workspace)).blockers, []);
+});
+
+test("bootstrap states the paper role boundaries", async () => {
+  const workspace = await temporaryWorkspace();
+  await initWorkspace(workspace);
+  const agents = await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8");
+  for (const text of ["Inference Agents", "Wiki Maintainers", "Skill Proposers", "validation or test evidence"]) assert.match(agents, new RegExp(text, "u"));
+  assert.equal(agents.includes(BOOTSTRAP), true);
+  assert.equal(await fs.readFile(path.join(workspace, "CLAUDE.md"), "utf8"), "@AGENTS.md\n");
+});
+
+test("zero-source-write init leaves instruction files untouched", async () => {
+  const workspace = await temporaryWorkspace();
+  await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Owner rules\n");
+  await initWorkspace(workspace, { mode: "zero-source-write" });
+  assert.equal(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), "# Owner rules\n");
+  await assert.rejects(fs.access(path.join(workspace, "CLAUDE.md")));
+  assert.deepEqual((await doctorWorkspace(workspace)).blockers, []);
+});
+
+test("doctor returns a nonzero CLI result for an uninitialized workspace", async () => {
+  const workspace = await temporaryWorkspace();
+  const lines = [];
+  const code = await execute(["doctor", "--workspace", workspace, "--json"], { stdout: (line) => lines.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.equal(JSON.parse(lines.join("")).blockers.includes("Failed check: workspace.config"), true);
+});
+
+test("uninstall removes unchanged bootstrap content and preserves state", async () => {
+  const workspace = await temporaryWorkspace();
+  await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Owner rules\n");
+  await fs.writeFile(path.join(workspace, "CLAUDE.md"), "# Claude rules\n");
+  await initWorkspace(workspace);
+  const preview = await uninstallWorkspace(workspace, { dryRun: true });
+  assert.deepEqual(preview.changes.map((change) => change.path), ["AGENTS.md", "CLAUDE.md"]);
+  await uninstallWorkspace(workspace);
+  assert.equal(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), "# Owner rules\n");
+  assert.equal(await fs.readFile(path.join(workspace, "CLAUDE.md"), "utf8"), "# Claude rules\n");
+  assert.equal(JSON.parse(await fs.readFile(path.join(workspace, ".wikiskill/config.json"), "utf8")).schema, "wikiskill.workspace.v1");
+});
+
+test("uninstall blocks when the managed block was edited", async () => {
+  const workspace = await temporaryWorkspace();
+  await initWorkspace(workspace);
+  const agentsPath = path.join(workspace, "AGENTS.md");
+  await fs.writeFile(agentsPath, (await fs.readFile(agentsPath, "utf8")).replace("offline Skill evolution", "modified evolution"));
+  await assert.rejects(uninstallWorkspace(workspace), /managed block was edited/u);
+});
+
+test("init rejects symlinked installation paths", async () => {
+  const workspace = await temporaryWorkspace();
+  const outside = await temporaryWorkspace();
+  await fs.symlink(outside, path.join(workspace, ".wikiskill"));
+  await assert.rejects(initWorkspace(workspace), /must not be a symlink/u);
+  assert.deepEqual(await fs.readdir(outside), []);
+});
+
+test("init rejects an incompatible existing config", async () => {
+  const workspace = await temporaryWorkspace();
+  await fs.mkdir(path.join(workspace, ".wikiskill"));
+  await fs.writeFile(path.join(workspace, ".wikiskill/config.json"), "{}\n");
+  await assert.rejects(initWorkspace(workspace), /incompatible/u);
+  await assert.rejects(fs.access(path.join(workspace, "AGENTS.md")));
+});
+
+test("standalone package has no host-monorepo dependency", async () => {
+  const packageRoot = path.resolve(__dirname, "..");
+  const manifest = JSON.parse(await fs.readFile(path.join(packageRoot, "package.json"), "utf8"));
+  assert.equal(manifest.dependencies, undefined);
+  for (const file of (await fs.readdir(path.join(packageRoot, "src"))).filter((name) => name.endsWith(".js"))) {
+    const source = await fs.readFile(path.join(packageRoot, "src", file), "utf8");
+    assert.doesNotMatch(source, /(?:require|import)\s*\(?["'][^"']*(?:server|web|desktop|plugin-store|jft0m)[^"']*["']/u);
+  }
+});
+
+test("README documents the complete exact-output dataset task contract", async () => {
+  const readme = await fs.readFile(path.join(__dirname, "..", "README.md"), "utf8");
+  assert.match(readme, /"groundTruth"[\s\S]*"schema": "wikiskill\.scorer\.exact-output\.v1"[\s\S]*"expected"/u);
+  assert.match(readme, /"outputSchema"[\s\S]*"additionalProperties": false/u);
+  assert.match(readme, /groundTruth\.expected.*same JSON value and shape.*prediction/u);
+  assert.match(readme, /passes `input` and `outputSchema` to the Inference Agent/u);
+});
+
+test("README documents command-scored coding tasks", async () => {
+  const readme = await fs.readFile(path.join(__dirname, "..", "README.md"), "utf8");
+  assert.match(readme, /builtin:command-exit-v1/u);
+  assert.match(readme, /"command": \["node", "--test", "value\.test\.cjs"\]/u);
+  assert.match(readme, /executed directly without a shell/u);
+  assert.match(readme, /Git status\/diff.*verifier command/u);
+});

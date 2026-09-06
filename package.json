@@ -1,0 +1,23 @@
+{
+  "name": "wikiskill",
+  "version": "0.1.0",
+  "description": "Standalone WikiSkill evolution engine",
+  "type": "commonjs",
+  "files": [
+    "acceptance",
+    "bin",
+    "fixtures",
+    "src",
+    "README.md"
+  ],
+  "bin": {
+    "wikiskill": "bin/wikiskill"
+  },
+  "scripts": {
+    "acceptance": "node acceptance/black-box.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

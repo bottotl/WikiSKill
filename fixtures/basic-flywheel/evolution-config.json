@@ -1,0 +1,9 @@
+{
+  "schema": "wikiskill.evolution-config.v1",
+  "adapterModule": "adapters/adapter.cjs",
+  "runnerModule": "adapters/runner.cjs",
+  "maintainerModule": "adapters/maintainer.cjs",
+  "proposerModule": "adapters/proposer.cjs",
+  "model": { "id": "fixture-model" },
+  "iterationLimit": 1
+}

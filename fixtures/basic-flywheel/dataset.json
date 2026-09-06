@@ -1,0 +1,14 @@
+{
+  "schema": "wikiskill.dataset.v1",
+  "domain": "basic-flywheel-fixture",
+  "tasks": [
+    { "id": "train-1", "split": "train", "input": { "request": "train-1" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "train-2", "split": "train", "input": { "request": "train-2" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "train-3", "split": "train", "input": { "request": "train-3" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "train-4", "split": "train", "input": { "request": "train-4" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "validation-1", "split": "val", "input": { "request": "validation-1" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "validation-2", "split": "val", "input": { "request": "validation-2" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "test-1", "split": "test", "input": { "request": "test-1" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "test-2", "split": "test", "input": { "request": "test-2" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } }
+  ]
+}
