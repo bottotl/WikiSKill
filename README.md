@@ -33,6 +33,19 @@ WikiSkill 维护三层状态：
 - `Wiki`：从训练轨迹中持续整理的模式、日志和 Skill 影响记录。
 - `Skills`：当前生效的 Agent 程序知识，以及通过 validation gate 的候选。
 
+### 人负责定义演化问题
+
+论文的演化算法将训练任务 `Dtrain`、验证任务 `Dval`、测试任务 `Dtest`、性能
+度量 `R` 和迭代次数 `K` 作为运行循环的前提条件。它们需要由系统使用者根据目标
+任务提供：具体包括任务输入与环境、正确性判定所需的 ground truth 或 verifier、彼此
+独立的 train/val/test 划分，以及能反映目标质量的 scorer。
+
+在这些前提就绪后，论文定义的单次演化循环不包含人工决策角色：Inference Agent
+执行任务，Wiki Maintainer 更新 Wiki，Skill Proposer 提出修改，validation gate 根据
+`R` 自动接受或回滚 Skill。论文没有规定人工逐轮审批候选或维护 Wiki；本项目的
+`candidate diff`、`candidate apply` 和 `rollback` 是工程上的显式发布接口，不应视为
+论文算法的人工步骤。
+
 一次 evolution 按以下顺序执行：
 
 1. 用当前 Skills 运行完整 validation，得到 baseline。
