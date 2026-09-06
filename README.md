@@ -1,7 +1,7 @@
 # WikiSkill
 
-WikiSkill 是论文 Raw -> Wiki -> Skills 演化循环的独立复现。它可以脱离
-jft0m 安装和运行，不导入或启动 jft0m 服务。
+WikiSkill 复现了论文中的 Raw -> Wiki -> Skills 演化循环：将 Agent 执行
+经验整理为持久 Wiki，并通过验证门禁持续迭代 Skills。
 
 仓库自带 `fixtures/basic-flywheel/`，用于确定性验证完整产品流程。该
 fixture 证明产品功能正常，不用于声称真实模型效果或复现论文统计结论。
