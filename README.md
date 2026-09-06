@@ -87,6 +87,21 @@ acceptedIterations = [1, 2]
 跨两轮保留。输出中的 evidence class 固定为
 `protocol-fixture-not-real-agent-evidence`。
 
+## 冻结 Skill 上下文
+
+jft0m 等宿主可以在一次 Agent 会话开始前冻结当前 live Skills：
+
+```sh
+wikiskill context prepare --workspace <workspace> --json
+wikiskill context skill-get --workspace <workspace> --context <context-id> --skill <skill-id> --json
+wikiskill context receipt --workspace <workspace> --context <context-id> --skill <skill-id> --json
+```
+
+`prepare` 返回 Skill inventory、bundle digest 和两条可调用命令。`skill-get`
+始终读取该 context 创建时的快照，即使 live Skill 随后发生变化；`receipt` 记录
+本次 context 实际消费的 Skill revision。Context 只服务会话注入，不允许读取
+Wiki、candidate 或评测私有输入。
+
 ## Dataset 合同
 
 最短复现路径使用显式 `wikiskill.dataset.v1` 文件。每个 task 声明 split、
@@ -174,6 +189,9 @@ uninstall
 evolve
 status
 configure
+context prepare
+context skill-get
+context receipt
 candidate diff
 candidate apply
 rollback

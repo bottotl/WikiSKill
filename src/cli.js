@@ -7,6 +7,9 @@ const core = require("./index");
 const HELP = `wikiskill init <workspace> [--mode direct|zero-source-write] [--dry-run] --json
 wikiskill doctor --workspace <workspace> --json
 wikiskill uninstall --workspace <workspace> [--dry-run] --json
+wikiskill context prepare --workspace <workspace> --json
+wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> --json
+wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
 wikiskill evolve --workspace <workspace> --target <skill-id> --dataset <dataset.json> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
@@ -16,7 +19,8 @@ wikiskill rollback --workspace <workspace> --receipt <id> --json
 `;
 
 const SUBCOMMANDS = Object.freeze({
-  candidate: new Set(["diff", "apply"])
+  candidate: new Set(["diff", "apply"]),
+  context: new Set(["prepare", "skill-get", "receipt"])
 });
 
 const VALUE_FLAGS = Object.freeze({
@@ -32,7 +36,9 @@ const VALUE_FLAGS = Object.freeze({
   "--model": "modelId",
   "--scorer": "scorerRef",
   "--receipt": "receipt",
-  "--state-root": "stateRoot"
+  "--state-root": "stateRoot",
+  "--context": "contextId",
+  "--skill": "skillId"
 });
 
 const parse = (argv) => {
@@ -116,6 +122,11 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       return 0;
     } else if (options.command === "configure") {
       data = await core.configureEvolution(options.workspace, JSON.parse(await fs.readFile(path.resolve(options.input), "utf8")), options);
+    } else if (options.command === "context") {
+      if (options.subcommand === "prepare") data = await core.prepareContext(options.workspace);
+      else if (options.subcommand === "skill-get") data = await core.getContextSkill(options.workspace, options.contextId, options.skillId);
+      else if (options.subcommand === "receipt") data = await core.recordContextSkillUse(options.workspace, options.contextId, options.skillId);
+      else throw new Error("Only `context prepare`, `context skill-get`, and `context receipt` are supported.");
     } else if (options.command === "candidate") {
       if (options.subcommand === "diff") data = await core.diffCandidate(options.workspace, options.candidate);
       else if (options.subcommand === "apply") data = await core.applyCandidate(options.workspace, options.candidate, options);
