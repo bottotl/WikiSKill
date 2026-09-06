@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { execute } = require("../src/cli");
-const { BOOTSTRAP, doctorWorkspace, initWorkspace, uninstallWorkspace } = require("../src/workspace");
+const { BOOTSTRAP, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap } = require("../src/workspace");
 
 const temporaryWorkspace = () => fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-workspace-"));
 
@@ -31,19 +31,54 @@ test("init creates only the minimal workspace and preserves Provider rules", asy
   assert.equal(config.bootstrapMode, "direct");
   assert.deepEqual(await fs.readdir(path.join(workspace, ".wikiskill")), [".gitignore", "candidates", "config.json", "raw", "receipts", "runtime", "skills", "wiki"]);
   assert.deepEqual(await fs.readdir(path.join(workspace, ".wikiskill", "raw")), []);
-  assert.match(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), /# Owner rules[\s\S]*wikiskill evolve --dataset/u);
+  assert.match(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), /# Owner rules[\s\S]*wikiskill context prepare/u);
   assert.equal(await fs.readFile(path.join(workspace, "CLAUDE.md"), "utf8"), "# Claude rules\n\n@AGENTS.md\n");
   assert.deepEqual((await initWorkspace(workspace)).changes, []);
   assert.deepEqual((await doctorWorkspace(workspace)).blockers, []);
 });
 
-test("bootstrap states the paper role boundaries", async () => {
+test("bootstrap tells the foreground Agent to consume only its frozen Skill context", async () => {
   const workspace = await temporaryWorkspace();
   await initWorkspace(workspace);
   const agents = await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8");
-  for (const text of ["Inference Agents", "Wiki Maintainers", "Skill Proposers", "validation or test evidence"]) assert.match(agents, new RegExp(text, "u"));
+  for (const text of ["prepare the frozen Agent context", "frozen Skill snapshot", "receipt command", "ground truth"]) assert.match(agents, new RegExp(text, "u"));
   assert.equal(agents.includes(BOOTSTRAP), true);
   assert.equal(await fs.readFile(path.join(workspace, "CLAUDE.md"), "utf8"), "@AGENTS.md\n");
+});
+
+test("bootstrap install manages repo instructions without creating a second WikiSkill workspace", async () => {
+  const workspace = await temporaryWorkspace();
+  await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Owner rules\n");
+  const command = "jft0m workspace harness prepare-context --repo . --json";
+  const preview = await updateBootstrap(workspace, "install", { command, dryRun: true });
+  assert.deepEqual(preview.changes.map((change) => change.path), ["AGENTS.md", "CLAUDE.md"]);
+  await assert.rejects(fs.access(path.join(workspace, ".wikiskill")));
+  await updateBootstrap(workspace, "install", { command });
+  assert.match(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), /jft0m workspace harness prepare-context --repo \. --json/u);
+  assert.equal(await fs.readFile(path.join(workspace, "CLAUDE.md"), "utf8"), "@AGENTS.md\n");
+  assert.deepEqual((await updateBootstrap(workspace, "install", { command })).changes, []);
+  await updateBootstrap(workspace, "uninstall", { command });
+  assert.equal(await fs.readFile(path.join(workspace, "AGENTS.md"), "utf8"), "# Owner rules\n");
+  await assert.rejects(fs.access(path.join(workspace, "CLAUDE.md")));
+  await assert.rejects(fs.access(path.join(workspace, ".wikiskill")));
+});
+
+test("bootstrap uninstall blocks if its managed command was edited", async () => {
+  const workspace = await temporaryWorkspace();
+  const command = "jft0m workspace harness prepare-context --repo . --json";
+  await updateBootstrap(workspace, "install", { command });
+  const agentsPath = path.join(workspace, "AGENTS.md");
+  await fs.writeFile(agentsPath, (await fs.readFile(agentsPath, "utf8")).replace("prepare-context", "changed-command"));
+  await assert.rejects(updateBootstrap(workspace, "uninstall", { command }), /managed block was edited/u);
+});
+
+test("public bootstrap CLI requires one explicit command and supports dry-run", async () => {
+  const workspace = await temporaryWorkspace();
+  const lines = [];
+  const code = await execute(["bootstrap", "install", "--workspace", workspace, "--command", "jft0m workspace harness prepare-context --repo . --json", "--dry-run", "--json"], { stdout: (line) => lines.push(line), stderr: () => {} });
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(lines.join("")).data.dryRun, true);
+  await assert.rejects(fs.access(path.join(workspace, "AGENTS.md")));
 });
 
 test("zero-source-write init leaves instruction files untouched", async () => {
@@ -80,7 +115,7 @@ test("uninstall blocks when the managed block was edited", async () => {
   const workspace = await temporaryWorkspace();
   await initWorkspace(workspace);
   const agentsPath = path.join(workspace, "AGENTS.md");
-  await fs.writeFile(agentsPath, (await fs.readFile(agentsPath, "utf8")).replace("offline Skill evolution", "modified evolution"));
+  await fs.writeFile(agentsPath, (await fs.readFile(agentsPath, "utf8")).replace("prepare the frozen Agent context", "modified managed instruction"));
   await assert.rejects(uninstallWorkspace(workspace), /managed block was edited/u);
 });
 

@@ -6,7 +6,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const { createCommandRunner } = require("./command-runner");
-const { doctorWorkspace, initWorkspace, uninstallWorkspace } = require("./workspace");
+const { doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap } = require("./workspace");
 const { configureEvolution, evolveWorkspace, statusWorkspaceEvolution } = require("./evolution");
 const { applyCandidate, diffCandidate, rollbackReceipt } = require("./publishing");
 const { renderInferencePrompt } = require("./prompt-contract");
@@ -1285,4 +1285,4 @@ async function diffRun(runOrId, stateRoot) {
 }
 async function retryRun(runOrId, options = {}) { return runEvolution(runOrId, options); }
 
-module.exports = { DATASET_SCHEMA, TRAJECTORY_SCHEMA, ENVELOPE, WikiSkillError, validateDataset, inspectRepository, createRun, runEvolution, retryRun, statusRun, diffRun, applyRun, rollbackRun, exportWiki, digestText, doctorWorkspace, initWorkspace, uninstallWorkspace, renderInferencePrompt, configureEvolution, evolveWorkspace, statusWorkspaceEvolution, applyCandidate, diffCandidate, rollbackReceipt, prepareContext, getContextSkill, recordContextSkillUse };
+module.exports = { DATASET_SCHEMA, TRAJECTORY_SCHEMA, ENVELOPE, WikiSkillError, validateDataset, inspectRepository, createRun, runEvolution, retryRun, statusRun, diffRun, applyRun, rollbackRun, exportWiki, digestText, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap, renderInferencePrompt, configureEvolution, evolveWorkspace, statusWorkspaceEvolution, applyCandidate, diffCandidate, rollbackReceipt, prepareContext, getContextSkill, recordContextSkillUse };

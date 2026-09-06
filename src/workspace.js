@@ -8,18 +8,22 @@ const BOOTSTRAP_START = "<!-- wikiskill-bootstrap:start -->";
 const BOOTSTRAP_END = "<!-- wikiskill-bootstrap:end -->";
 const CLAUDE_IMPORT = "@AGENTS.md";
 const CONFIG_SCHEMA = "wikiskill.workspace.v1";
-const BOOTSTRAP = [
+const bootstrapContent = (command) => [
   BOOTSTRAP_START,
   "## WikiSkill",
   "",
-  "This repository uses WikiSkill for offline Skill evolution. Run evolution through the installed wikiskill evolve --dataset command.",
+  "Before starting a user task, prepare the frozen Agent context:",
   "",
-  "- Inference Agents may use Skills injected by the runner, but must not read .wikiskill/wiki/, ground truth, or another dataset split.",
-  "- Wiki Maintainers update only the Wiki from sampled training trajectories.",
-  "- Skill Proposers use the Wiki and trajectories they select from the current training run; they must not read validation or test evidence.",
-  "- Review wikiskill candidate diff before applying a candidate.",
+  "```sh",
+  command,
+  "```",
+  "",
+  "Follow the returned instructions and use only the frozen Skill snapshot for this session.",
+  "Record Skill consumption with the returned receipt command. Do not read WikiSkill Wiki, candidates, ground truth, or evaluation evidence during the user task.",
   BOOTSTRAP_END
 ].join("\n");
+const DEFAULT_CONTEXT_COMMAND = "wikiskill context prepare --workspace . --json";
+const BOOTSTRAP = bootstrapContent(DEFAULT_CONTEXT_COMMAND);
 
 const DIRECTORIES = ["raw", "wiki/patterns", "skills", "candidates", "receipts", "runtime"];
 const INITIAL_FILES = {
@@ -40,20 +44,20 @@ const resolveWorkspace = async (input) => {
   return workspace;
 };
 
-const replaceManagedBlock = (current) => {
+const replaceManagedBlock = (current, bootstrap = BOOTSTRAP) => {
   const start = current.indexOf(BOOTSTRAP_START);
   const end = current.indexOf(BOOTSTRAP_END);
   if ((start === -1) !== (end === -1) || (start !== -1 && end < start)) throw new Error("AGENTS.md contains an incomplete WikiSkill managed block.");
-  if (start === -1) return current.trimEnd() + (current.trim() ? "\n\n" : "") + BOOTSTRAP + "\n";
-  return current.slice(0, start) + BOOTSTRAP + current.slice(end + BOOTSTRAP_END.length);
+  if (start === -1) return current.trimEnd() + (current.trim() ? "\n\n" : "") + bootstrap + "\n";
+  return current.slice(0, start) + bootstrap + current.slice(end + BOOTSTRAP_END.length);
 };
 
-const removeManagedBlock = (current) => {
+const removeManagedBlock = (current, expectedBootstrap = BOOTSTRAP) => {
   const start = current.indexOf(BOOTSTRAP_START);
   const end = current.indexOf(BOOTSTRAP_END);
   if (start === -1 && end === -1) return current;
   if (start === -1 || end < start) throw new Error("AGENTS.md contains an incomplete WikiSkill managed block.");
-  if (current.slice(start, end + BOOTSTRAP_END.length) !== BOOTSTRAP) throw new Error("AGENTS.md WikiSkill managed block was edited; automatic uninstall is blocked.");
+  if (current.slice(start, end + BOOTSTRAP_END.length) !== expectedBootstrap) throw new Error("AGENTS.md WikiSkill managed block was edited; automatic uninstall is blocked.");
   const before = current.slice(0, start).trimEnd();
   const after = current.slice(end + BOOTSTRAP_END.length).trimStart();
   return (before + (before && after ? "\n\n" : "") + after).replace(/\n*$/u, "\n");
@@ -200,4 +204,44 @@ async function uninstallWorkspace(input, options = {}) {
   return { workspace, dryRun, preservedState: ".wikiskill/", changes: changes.map(({ content: _content, ...change }) => change) };
 }
 
-module.exports = { BOOTSTRAP, doctorWorkspace, initWorkspace, uninstallWorkspace };
+const bootstrapPlan = async (workspace, command, operation) => {
+  const agentsPath = path.join(workspace, "AGENTS.md");
+  const claudePath = path.join(workspace, "CLAUDE.md");
+  for (const target of [agentsPath, claudePath]) {
+    const stat = await fs.lstat(target).catch(() => null);
+    if (stat?.isSymbolicLink()) throw new Error("WikiSkill bootstrap instruction path must not be a symlink: " + path.basename(target));
+  }
+  const bootstrap = bootstrapContent(command);
+  const beforeAgents = await readText(agentsPath);
+  const beforeClaude = await readText(claudePath);
+  const afterAgents = operation === "install" ? replaceManagedBlock(beforeAgents, bootstrap) : removeManagedBlock(beforeAgents, bootstrap);
+  const afterClaude = operation === "install" ? addClaudeImport(beforeClaude) : removeClaudeImport(beforeClaude);
+  return [
+    { path: "AGENTS.md", before: beforeAgents, after: afterAgents },
+    { path: "CLAUDE.md", before: beforeClaude, after: afterClaude }
+  ].filter((item) => item.before !== item.after).map((item) => ({
+    path: item.path,
+    operation: item.after.trim() ? (item.before ? "update" : "create") : "delete",
+    diff: renderDiff(item.path, item.before, item.after),
+    content: item.after
+  }));
+};
+
+async function updateBootstrap(input, operation, options = {}) {
+  if (operation !== "install" && operation !== "uninstall") throw new Error("WikiSkill bootstrap operation must be install or uninstall.");
+  const workspace = await resolveWorkspace(input);
+  const command = typeof options.command === "string" && options.command.trim() ? options.command.trim() : DEFAULT_CONTEXT_COMMAND;
+  if (/\r|\n/u.test(command) || command.includes("```") || command.includes(BOOTSTRAP_START) || command.includes(BOOTSTRAP_END)) throw new Error("WikiSkill bootstrap command must be one safe Markdown line.");
+  const dryRun = options.dryRun === true;
+  const changes = await bootstrapPlan(workspace, command, operation);
+  if (!dryRun) {
+    for (const change of changes) {
+      const target = path.join(workspace, change.path);
+      if (change.operation === "delete") await fs.rm(target);
+      else await fs.writeFile(target, change.content, "utf8");
+    }
+  }
+  return { workspace, operation, command, dryRun, changes: changes.map(({ content: _content, ...change }) => change) };
+}
+
+module.exports = { BOOTSTRAP, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap };

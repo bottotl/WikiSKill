@@ -102,6 +102,19 @@ wikiskill context receipt --workspace <workspace> --context <context-id> --skill
 本次 context 实际消费的 Skill revision。Context 只服务会话注入，不允许读取
 Wiki、candidate 或评测私有输入。
 
+宿主需要把冻结上下文接入现有代码仓库时，可以只安装受管说明区块，而不在代码
+仓库中创建第二份 `.wikiskill` 状态：
+
+```sh
+wikiskill bootstrap install --workspace <repo> --command "jft0m workspace harness prepare-context --repo . --json" --dry-run --json
+wikiskill bootstrap install --workspace <repo> --command "jft0m workspace harness prepare-context --repo . --json" --json
+wikiskill bootstrap uninstall --workspace <repo> --command "jft0m workspace harness prepare-context --repo . --json" --json
+```
+
+`install` 只维护 `AGENTS.md` 中带 marker 的区块和 `CLAUDE.md` 的
+`@AGENTS.md` 引用。`uninstall` 发现受管区块被人工修改时会停止，避免覆盖用户
+规则。
+
 ## Dataset 合同
 
 最短复现路径使用显式 `wikiskill.dataset.v1` 文件。每个 task 声明 split、
@@ -192,6 +205,8 @@ configure
 context prepare
 context skill-get
 context receipt
+bootstrap install
+bootstrap uninstall
 candidate diff
 candidate apply
 rollback

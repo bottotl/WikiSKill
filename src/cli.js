@@ -10,6 +10,7 @@ wikiskill uninstall --workspace <workspace> [--dry-run] --json
 wikiskill context prepare --workspace <workspace> --json
 wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
+wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill evolve --workspace <workspace> --target <skill-id> --dataset <dataset.json> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
@@ -20,7 +21,8 @@ wikiskill rollback --workspace <workspace> --receipt <id> --json
 
 const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
-  context: new Set(["prepare", "skill-get", "receipt"])
+  context: new Set(["prepare", "skill-get", "receipt"]),
+  bootstrap: new Set(["install", "uninstall"])
 });
 
 const VALUE_FLAGS = Object.freeze({
@@ -38,7 +40,8 @@ const VALUE_FLAGS = Object.freeze({
   "--receipt": "receipt",
   "--state-root": "stateRoot",
   "--context": "contextId",
-  "--skill": "skillId"
+  "--skill": "skillId",
+  "--command": "bootstrapCommand"
 });
 
 const parse = (argv) => {
@@ -127,6 +130,10 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       else if (options.subcommand === "skill-get") data = await core.getContextSkill(options.workspace, options.contextId, options.skillId);
       else if (options.subcommand === "receipt") data = await core.recordContextSkillUse(options.workspace, options.contextId, options.skillId);
       else throw new Error("Only `context prepare`, `context skill-get`, and `context receipt` are supported.");
+    } else if (options.command === "bootstrap") {
+      if (options.subcommand !== "install" && options.subcommand !== "uninstall") throw new Error("Only `bootstrap install` and `bootstrap uninstall` are supported.");
+      if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");
+      data = await core.updateBootstrap(options.workspace, options.subcommand, { command: options.bootstrapCommand, dryRun: options.dryRun });
     } else if (options.command === "candidate") {
       if (options.subcommand === "diff") data = await core.diffCandidate(options.workspace, options.candidate);
       else if (options.subcommand === "apply") data = await core.applyCandidate(options.workspace, options.candidate, options);
