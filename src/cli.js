@@ -10,6 +10,7 @@ wikiskill uninstall --workspace <workspace> [--dry-run] --json
 wikiskill context prepare --workspace <workspace> --json
 wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
+wikiskill context receipts --workspace <workspace> --context <id> --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill evolve --workspace <workspace> --target <skill-id> --dataset <dataset.json> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
@@ -22,7 +23,7 @@ wikiskill rollback --workspace <workspace> --receipt <id> --json
 
 const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
-  context: new Set(["prepare", "skill-get", "receipt"]),
+  context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate"])
 });
@@ -131,7 +132,8 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       if (options.subcommand === "prepare") data = await core.prepareContext(options.workspace);
       else if (options.subcommand === "skill-get") data = await core.getContextSkill(options.workspace, options.contextId, options.skillId);
       else if (options.subcommand === "receipt") data = await core.recordContextSkillUse(options.workspace, options.contextId, options.skillId);
-      else throw new Error("Only `context prepare`, `context skill-get`, and `context receipt` are supported.");
+      else if (options.subcommand === "receipts") data = await core.listContextSkillReceipts(options.workspace, options.contextId);
+      else throw new Error("Only `context prepare`, `context skill-get`, `context receipt`, and `context receipts` are supported.");
     } else if (options.command === "bootstrap") {
       if (options.subcommand !== "install" && options.subcommand !== "uninstall") throw new Error("Only `bootstrap install` and `bootstrap uninstall` are supported.");
       if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");

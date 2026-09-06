@@ -10,7 +10,7 @@ const { doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap } = 
 const { configureEvolution, evolveWorkspace, statusWorkspaceEvolution } = require("./evolution");
 const { applyCandidate, diffCandidate, rollbackReceipt } = require("./publishing");
 const { renderInferencePrompt } = require("./prompt-contract");
-const { getContextSkill, prepareContext, recordContextSkillUse } = require("./context");
+const { getContextSkill, listContextSkillReceipts, prepareContext, recordContextSkillUse } = require("./context");
 
 const ENGINE_VERSION = require("../package.json").version;
 const DATASET_SCHEMA = "wikiskill.dataset.v1";
@@ -1285,4 +1285,4 @@ async function diffRun(runOrId, stateRoot) {
 }
 async function retryRun(runOrId, options = {}) { return runEvolution(runOrId, options); }
 
-module.exports = { DATASET_SCHEMA, TRAJECTORY_SCHEMA, ENVELOPE, WikiSkillError, validateDataset, inspectRepository, createRun, runEvolution, retryRun, statusRun, diffRun, applyRun, rollbackRun, exportWiki, digestText, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap, renderInferencePrompt, configureEvolution, evolveWorkspace, statusWorkspaceEvolution, applyCandidate, diffCandidate, rollbackReceipt, prepareContext, getContextSkill, recordContextSkillUse };
+module.exports = { DATASET_SCHEMA, TRAJECTORY_SCHEMA, ENVELOPE, WikiSkillError, validateDataset, inspectRepository, createRun, runEvolution, retryRun, statusRun, diffRun, applyRun, rollbackRun, exportWiki, digestText, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap, renderInferencePrompt, configureEvolution, evolveWorkspace, statusWorkspaceEvolution, applyCandidate, diffCandidate, rollbackReceipt, prepareContext, getContextSkill, listContextSkillReceipts, recordContextSkillUse };

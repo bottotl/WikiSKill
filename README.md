@@ -99,11 +99,13 @@ jft0m 等宿主可以在一次 Agent 会话开始前冻结当前 live Skills：
 wikiskill context prepare --workspace <workspace> --json
 wikiskill context skill-get --workspace <workspace> --context <context-id> --skill <skill-id> --json
 wikiskill context receipt --workspace <workspace> --context <context-id> --skill <skill-id> --json
+wikiskill context receipts --workspace <workspace> --context <context-id> --json
 ```
 
 `prepare` 返回 Skill inventory、bundle digest 和两条可调用命令。`skill-get`
 始终读取该 context 创建时的快照，即使 live Skill 随后发生变化；`receipt` 记录
-本次 context 实际消费的 Skill revision。Context 只服务会话注入，不允许读取
+本次 context 实际消费的 Skill revision；`receipts` 只读列出该 context 已记录的
+消费凭据。Context 只服务会话注入，不允许读取
 Wiki、candidate 或评测私有输入。
 
 宿主需要把冻结上下文接入现有代码仓库时，可以只安装受管说明区块，而不在代码
@@ -225,6 +227,7 @@ configure
 context prepare
 context skill-get
 context receipt
+context receipts
 bootstrap install
 bootstrap uninstall
 dataset validate

@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { execute } = require("../src/cli");
-const { getContextSkill, prepareContext, recordContextSkillUse } = require("../src/context");
+const { getContextSkill, listContextSkillReceipts, prepareContext, recordContextSkillUse } = require("../src/context");
 const { initWorkspace } = require("../src/workspace");
 
 const setup = async () => {
@@ -31,6 +31,7 @@ test("prepares an immutable Skill context and records consumption", async () => 
   const receipt = await recordContextSkillUse(workspace, prepared.contextId, "review-code");
   assert.equal(receipt.bundleDigest, frozen.bundleDigest);
   assert.equal(await fs.access(path.join(workspace, ".wikiskill", "runtime", "contexts", prepared.contextId, "receipts", `${receipt.receiptId}.json`)).then(() => true), true);
+  assert.deepEqual((await listContextSkillReceipts(workspace, prepared.contextId)).receipts, [receipt]);
 });
 
 test("context CLI exposes prepare, skill-get, and receipt", async () => {
@@ -44,8 +45,10 @@ test("context CLI exposes prepare, skill-get, and receipt", async () => {
   const prepared = await invoke(["context", "prepare", "--workspace", workspace, "--json"]);
   const skill = await invoke(["context", "skill-get", "--workspace", workspace, "--context", prepared.contextId, "--skill", "review-code", "--json"]);
   const receipt = await invoke(["context", "receipt", "--workspace", workspace, "--context", prepared.contextId, "--skill", "review-code", "--json"]);
+  const receipts = await invoke(["context", "receipts", "--workspace", workspace, "--context", prepared.contextId, "--json"]);
   assert.equal(skill.skillId, "review-code");
   assert.equal(receipt.contextId, prepared.contextId);
+  assert.deepEqual(receipts.receipts.map((item) => item.skillId), ["review-code"]);
 });
 
 test("rejects missing Skills and context traversal", async () => {

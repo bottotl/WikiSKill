@@ -124,4 +124,18 @@ async function recordContextSkillUse(input, contextId, skillId) {
   return receipt;
 }
 
-module.exports = { getContextSkill, prepareContext, recordContextSkillUse };
+async function listContextSkillReceipts(input, contextId) {
+  const { workspace } = await resolveWorkspace(input);
+  const context = await readContext(workspace, contextId);
+  const entries = await fs.readdir(path.join(context.root, "receipts"), { withFileTypes: true });
+  const receipts = [];
+  for (const entry of entries.filter((item) => item.isFile() && item.name.endsWith(".json")).sort((left, right) => left.name.localeCompare(right.name))) {
+    const receipt = JSON.parse(await fs.readFile(path.join(context.root, "receipts", entry.name), "utf8"));
+    const descriptor = context.manifest.inventory.find((skill) => skill.id === receipt.skillId);
+    if (receipt.schema !== "wikiskill.context-skill-receipt.v1" || receipt.contextId !== contextId || !descriptor || receipt.bundleDigest !== descriptor.bundleDigest) throw new Error(`Context Skill receipt is invalid: ${entry.name}`);
+    receipts.push(receipt);
+  }
+  return { contextId, receipts };
+}
+
+module.exports = { getContextSkill, listContextSkillReceipts, prepareContext, recordContextSkillUse };
