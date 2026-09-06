@@ -1,23 +1,23 @@
-# Basic Flywheel Fixture
+# 基础飞轮 Fixture
 
-This deterministic fixture proves the standalone product flow without claiming
-real-model quality or paper-level statistical significance.
+这套确定性 fixture 用于证明 WikiSkill 产品流程可以完整运行，不用于声称
+真实模型效果或论文统计结论。
 
-It exercises:
+它覆盖：
 
-- an explicit 4 train / 2 validation / 2 test dataset;
-- baseline validation score 0;
-- four training trajectories and a persistent Wiki update;
-- one atomic Skill proposal with strict validation gain to 1;
-- frozen baseline test score 0 and evolved test score 1;
-- candidate diff, dry-run apply, apply, and rollback.
+- 4 个 training、2 个 validation、2 个 test task；
+- baseline validation 为 0；
+- 第 1 轮从 training evidence 推导一条规则，validation 提升到 0.5；
+- 第 2 轮推导另一条规则，validation 提升到 1；
+- Wiki 跨两轮持续更新；
+- frozen baseline test 为 0，evolved test 为 1；
+- candidate diff、dry-run apply、apply 和 rollback。
 
-Run the installed-package black-box flow:
+运行安装包黑盒验收：
 
 ```sh
 npm run acceptance
 ```
 
-The command creates an isolated temporary workspace and removes it after all
-assertions pass. Files under `adapters/` are deterministic fixture roles, not
-real Provider implementations.
+命令会创建隔离的临时 workspace，并在所有断言通过后清理。`adapters/`
+中的角色是 deterministic fixture，不是真实 Provider。

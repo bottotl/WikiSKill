@@ -5,5 +5,5 @@
   "maintainerModule": "adapters/maintainer.cjs",
   "proposerModule": "adapters/proposer.cjs",
   "model": { "id": "fixture-model" },
-  "iterationLimit": 1
+  "iterationLimit": 2
 }

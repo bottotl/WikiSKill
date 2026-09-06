@@ -1,6 +1,9 @@
 ---
 name: target-skill
-description: Deterministic fixture target.
+description: Apply only evidence-derived category mappings.
 ---
 
-Use the old procedure.
+Return the mapped value for the task category. Return UNKNOWN when no mapping
+is listed.
+
+## Rules

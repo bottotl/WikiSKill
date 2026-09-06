@@ -71,10 +71,16 @@ const main = async () => {
     const result = events.at(-1).data;
     assert.equal(result.state.baselineValidationScore, 0);
     assert.equal(result.state.bestValidationScore, 1);
+    assert.deepEqual(result.state.proposalHistory.map((entry) => entry.candidateValidationScore), [0.5, 1]);
+    assert.deepEqual(result.state.proposalHistory.map((entry) => entry.accepted), [true, true]);
+    assert.deepEqual(result.state.acceptedIterations, [1, 2]);
     assert.equal(result.state.baselineTestScore, 0);
     assert.equal(result.state.testScore, 1);
     assert.equal(result.state.testGain, 1);
     assert.equal(await fs.readFile(path.join(skillRoot, "SKILL.md"), "utf8"), baseline);
+    const wikiPattern = await fs.readFile(path.join(workspace, ".wikiskill", "wiki", "patterns", "trajectory-outcomes.md"), "utf8");
+    assert.match(wikiPattern, /Iteration 1/u);
+    assert.match(wikiPattern, /Iteration 2/u);
 
     const status = invoke(["status", "--workspace", workspace, "--run", result.runId, "--json"], env)[0];
     assert.equal(status.data.state.status, "completed");
@@ -82,7 +88,9 @@ const main = async () => {
     assert.equal(invoke(["candidate", "diff", "--workspace", workspace, "--candidate", candidateId, "--json"], env)[0].success, true);
     assert.equal(invoke(["candidate", "apply", "--workspace", workspace, "--candidate", candidateId, "--dry-run", "--json"], env)[0].data.dryRun, true);
     const applied = invoke(["candidate", "apply", "--workspace", workspace, "--candidate", candidateId, "--json"], env)[0];
-    assert.match(await fs.readFile(path.join(skillRoot, "SKILL.md"), "utf8"), /improved procedure/u);
+    const appliedSkill = await fs.readFile(path.join(skillRoot, "SKILL.md"), "utf8");
+    assert.match(appliedSkill, /alpha => ALPHA_READY/u);
+    assert.match(appliedSkill, /beta => BETA_READY/u);
     const rolledBack = invoke(["rollback", "--workspace", workspace, "--receipt", applied.data.receipt.receiptId, "--json"], env)[0];
     assert.equal(rolledBack.success, true);
     assert.equal(await fs.readFile(path.join(skillRoot, "SKILL.md"), "utf8"), baseline);
@@ -94,7 +102,8 @@ const main = async () => {
         evidenceClass: "protocol-fixture-not-real-agent-evidence",
         datasetPath: "explicit",
         baselineValidationScore: result.state.baselineValidationScore,
-        candidateValidationScore: result.state.bestValidationScore,
+        candidateValidationScores: result.state.proposalHistory.map((entry) => entry.candidateValidationScore),
+        acceptedIterations: result.state.acceptedIterations,
         baselineTestScore: result.state.baselineTestScore,
         testScore: result.state.testScore,
         testGain: result.state.testGain,

@@ -1,6 +1,8 @@
 "use strict";
 
-module.exports = async ({ writePattern, appendLog }) => {
-  writePattern("procedure.md", "# Procedure\n\nUse the improved procedure.\n");
-  appendLog("Maintainer analyzed four deterministic training trajectories.");
+module.exports = async ({ iteration, sampledTraces, existingWiki, writePattern, appendLog }) => {
+  const passed = sampledTraces.filter((trace) => trace.score === 1).length;
+  const previous = existingWiki.patterns["trajectory-outcomes.md"] || "# Trajectory Outcomes\n";
+  writePattern("trajectory-outcomes.md", `${previous}\n- Iteration ${iteration}: ${passed}/${sampledTraces.length} sampled traces passed.\n`);
+  appendLog(`Maintainer recorded iteration ${iteration} training outcomes.`);
 };

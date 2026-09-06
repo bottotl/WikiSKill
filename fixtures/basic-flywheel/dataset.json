@@ -2,13 +2,13 @@
   "schema": "wikiskill.dataset.v1",
   "domain": "basic-flywheel-fixture",
   "tasks": [
-    { "id": "train-1", "split": "train", "input": { "request": "train-1" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "train-2", "split": "train", "input": { "request": "train-2" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "train-3", "split": "train", "input": { "request": "train-3" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "train-4", "split": "train", "input": { "request": "train-4" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "validation-1", "split": "val", "input": { "request": "validation-1" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "validation-2", "split": "val", "input": { "request": "validation-2" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "test-1", "split": "test", "input": { "request": "test-1" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
-    { "id": "test-2", "split": "test", "input": { "request": "test-2" }, "groundTruth": { "expected": "improved" }, "evaluator": { "capabilityRef": "scorer:fixture" } }
+    { "id": "train-alpha-1", "split": "train", "input": { "category": "alpha", "sample": "train-a1" }, "groundTruth": { "expected": "ALPHA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "train-alpha-2", "split": "train", "input": { "category": "alpha", "sample": "train-a2" }, "groundTruth": { "expected": "ALPHA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "train-beta-1", "split": "train", "input": { "category": "beta", "sample": "train-b1" }, "groundTruth": { "expected": "BETA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "train-beta-2", "split": "train", "input": { "category": "beta", "sample": "train-b2" }, "groundTruth": { "expected": "BETA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "validation-alpha", "split": "val", "input": { "category": "alpha", "sample": "validation-a" }, "groundTruth": { "expected": "ALPHA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "validation-beta", "split": "val", "input": { "category": "beta", "sample": "validation-b" }, "groundTruth": { "expected": "BETA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "test-alpha", "split": "test", "input": { "category": "alpha", "sample": "test-a" }, "groundTruth": { "expected": "ALPHA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } },
+    { "id": "test-beta", "split": "test", "input": { "category": "beta", "sample": "test-b" }, "groundTruth": { "expected": "BETA_READY" }, "evaluator": { "capabilityRef": "scorer:fixture" } }
   ]
 }

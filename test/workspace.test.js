@@ -114,14 +114,14 @@ test("README documents the complete exact-output dataset task contract", async (
   const readme = await fs.readFile(path.join(__dirname, "..", "README.md"), "utf8");
   assert.match(readme, /"groundTruth"[\s\S]*"schema": "wikiskill\.scorer\.exact-output\.v1"[\s\S]*"expected"/u);
   assert.match(readme, /"outputSchema"[\s\S]*"additionalProperties": false/u);
-  assert.match(readme, /groundTruth\.expected.*same JSON value and shape.*prediction/u);
-  assert.match(readme, /passes `input` and `outputSchema` to the Inference Agent/u);
+  assert.match(readme, /groundTruth\.expected.*相同 JSON 值和结构/u);
+  assert.match(readme, /只把 `input` 和 `outputSchema` 传给 Inference Agent/u);
 });
 
 test("README documents command-scored coding tasks", async () => {
   const readme = await fs.readFile(path.join(__dirname, "..", "README.md"), "utf8");
   assert.match(readme, /builtin:command-exit-v1/u);
   assert.match(readme, /"command": \["node", "--test", "value\.test\.cjs"\]/u);
-  assert.match(readme, /executed directly without a shell/u);
-  assert.match(readme, /Git status\/diff.*verifier command/u);
+  assert.match(readme, /直接执行且不经过 shell/u);
+  assert.match(readme, /Git status\/diff 和[\s\S]*verifier command/u);
 });
