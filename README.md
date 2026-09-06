@@ -33,12 +33,16 @@ WikiSkill 维护三层状态：
 - `Wiki`：从训练轨迹中持续整理的模式、日志和 Skill 影响记录。
 - `Skills`：当前生效的 Agent 程序知识，以及通过 validation gate 的候选。
 
-### 人负责定义演化问题
+### 演化输入合同
 
 论文的演化算法将训练任务 `Dtrain`、验证任务 `Dval`、测试任务 `Dtest`、性能
-度量 `R` 和迭代次数 `K` 作为运行循环的前提条件。它们需要由系统使用者根据目标
-任务提供：具体包括任务输入与环境、正确性判定所需的 ground truth 或 verifier、彼此
-独立的 train/val/test 划分，以及能反映目标质量的 scorer。
+度量 `R` 和迭代次数 `K` 作为运行循环的前提条件。Standalone CLI 要求调用方
+显式提供这些输入：具体包括任务输入与环境、正确性判定所需的 ground truth 或
+verifier、彼此独立的 train/val/test 划分，以及能反映目标质量的 scorer。
+
+上层产品可以从日常任务轨迹和验证证据自动物化这些输入，再调用
+`wikiskill dataset validate` 和 `wikiskill evolve`。WikiSkill 的算法层不会自行
+猜测、复制或补齐缺失的数据集和 scorer。
 
 在这些前提就绪后，论文定义的单次演化循环不包含人工决策角色：Inference Agent
 执行任务，Wiki Maintainer 更新 Wiki，Skill Proposer 提出修改，validation gate 根据
@@ -152,6 +156,7 @@ WikiSkill 只把 `input` 和 `outputSchema` 传给 Inference Agent；ground trut
 执行：
 
 ```sh
+wikiskill dataset validate --dataset dataset.json --scorer builtin:exact-output-v1 --json
 wikiskill evolve --workspace . --target <skill-id> --dataset dataset.json --provider claude --model <model-id> --scorer builtin:exact-output-v1 --json-events
 wikiskill status --workspace . --run <run-id> --json
 ```
@@ -207,6 +212,7 @@ context skill-get
 context receipt
 bootstrap install
 bootstrap uninstall
+dataset validate
 candidate diff
 candidate apply
 rollback

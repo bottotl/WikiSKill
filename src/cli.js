@@ -11,6 +11,7 @@ wikiskill context prepare --workspace <workspace> --json
 wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
+wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill evolve --workspace <workspace> --target <skill-id> --dataset <dataset.json> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
@@ -22,7 +23,8 @@ wikiskill rollback --workspace <workspace> --receipt <id> --json
 const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
   context: new Set(["prepare", "skill-get", "receipt"]),
-  bootstrap: new Set(["install", "uninstall"])
+  bootstrap: new Set(["install", "uninstall"]),
+  dataset: new Set(["validate"])
 });
 
 const VALUE_FLAGS = Object.freeze({
@@ -134,6 +136,18 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       if (options.subcommand !== "install" && options.subcommand !== "uninstall") throw new Error("Only `bootstrap install` and `bootstrap uninstall` are supported.");
       if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");
       data = await core.updateBootstrap(options.workspace, options.subcommand, { command: options.bootstrapCommand, dryRun: options.dryRun });
+    } else if (options.command === "dataset") {
+      if (options.subcommand !== "validate") throw new Error("Only `dataset validate` is supported.");
+      if (!options.datasetPath || !options.scorerRef) throw new Error("dataset validate requires --dataset and --scorer.");
+      const dataset = core.validateDataset(JSON.parse(await fs.readFile(path.resolve(options.datasetPath), "utf8")));
+      if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== options.scorerRef)) throw new Error("Every dataset task evaluator must match --scorer.");
+      data = {
+        schema: "wikiskill.dataset-validation.v1",
+        datasetPath: path.resolve(options.datasetPath),
+        digest: dataset.digest,
+        scorerRef: options.scorerRef,
+        splitCounts: Object.fromEntries(["train", "val", "test"].map((split) => [split, dataset.tasks.filter((task) => task.split === split).length]))
+      };
     } else if (options.command === "candidate") {
       if (options.subcommand === "diff") data = await core.diffCandidate(options.workspace, options.candidate);
       else if (options.subcommand === "apply") data = await core.applyCandidate(options.workspace, options.candidate, options);

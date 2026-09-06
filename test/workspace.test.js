@@ -81,6 +81,29 @@ test("public bootstrap CLI requires one explicit command and supports dry-run", 
   await assert.rejects(fs.access(path.join(workspace, "AGENTS.md")));
 });
 
+test("public dataset validate uses the standalone dataset and scorer contract", async () => {
+  const workspace = await temporaryWorkspace();
+  const datasetPath = path.join(workspace, "dataset.json");
+  const task = (id, split) => ({
+    id,
+    split,
+    input: { request: id },
+    groundTruth: { schema: "wikiskill.scorer.exact-output.v1", expected: { value: "ok" } },
+    evaluator: { capabilityRef: "builtin:exact-output-v1" }
+  });
+  await fs.writeFile(datasetPath, JSON.stringify({ schema: "wikiskill.dataset.v1", tasks: [task("train", "train"), task("val", "val"), task("test", "test")] }));
+  const lines = [];
+  const code = await execute(["dataset", "validate", "--dataset", datasetPath, "--scorer", "builtin:exact-output-v1", "--json"], { stdout: (line) => lines.push(line), stderr: () => {} });
+  assert.equal(code, 0);
+  const result = JSON.parse(lines.join(""));
+  assert.deepEqual(result.data.splitCounts, { train: 1, val: 1, test: 1 });
+  assert.match(result.data.digest, /^[a-f0-9]{64}$/u);
+
+  const mismatch = [];
+  assert.equal(await execute(["dataset", "validate", "--dataset", datasetPath, "--scorer", "other", "--json"], { stdout: (line) => mismatch.push(line), stderr: () => {} }), 1);
+  assert.match(JSON.parse(mismatch.join("")).blockers[0], /must match --scorer/u);
+});
+
 test("zero-source-write init leaves instruction files untouched", async () => {
   const workspace = await temporaryWorkspace();
   await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Owner rules\n");
