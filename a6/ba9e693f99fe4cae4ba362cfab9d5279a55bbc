@@ -1,0 +1,95 @@
+src/codex-learning.js
+  s_967db03fced08f::t_d71f9c8f5038bd 7,32,37,131-139
+  s_967db03fced08f::t_9661188eae2f84 113,143
+  s_967db03fced08f::t_0c9d5261b184aa 194,224,232
+  s_967db03fced08f::t_b2153a4ba31c98 100-110,142,192-193,222-223,230-231
+test/codex-runner.test.js
+  s_967db03fced08f::t_946194628341c0 113-120
+  s_967db03fced08f::t_33ab15c84addd7 121-122
+examples/cli-config-evolution/scripts/run-live.cjs
+  s_967db03fced08f::t_27dbfa752f8b2b 90,93,97-98
+  s_967db03fced08f::t_e51133fb4dd081 89,96
+test/claude-runner.test.js
+  s_967db03fced08f::t_9a27f44d6a7a21 54-63
+src/claude-learning.js
+  s_967db03fced08f::t_b2153a4ba31c98 59,63,68,95,104,112,121
+  s_967db03fced08f::t_0c9d5261b184aa 69,105,122
+test/context.test.js
+  s_967db03fced08f::t_2b07fc96924f83 37-50
+acceptance/black-box.js
+  s_967db03fced08f::t_27dbfa752f8b2b 61,64,68-69
+  s_967db03fced08f::t_e51133fb4dd081 60,67
+src/context.js
+  s_967db03fced08f::t_bf788fb2fe287d 68-69,75,89
+src/clean-environment.js
+  s_967db03fced08f::t_d71f9c8f5038bd 1-4,7-19,22-25,27-29,31-33,36-56
+  s_967db03fced08f::t_d317749e2f2db6 5-6,20-21,26,30,34-35
+test/codex-learning.test.js
+  s_967db03fced08f::t_29f723599eec5a 24-28,41
+  s_967db03fced08f::t_9661188eae2f84 54,83,120
+  s_967db03fced08f::t_9a27f44d6a7a21 116-119,121-134
+src/claude-runner.js
+  s_967db03fced08f::t_d71f9c8f5038bd 4,58-64
+test/evolution.test.js
+  s_967db03fced08f::t_e51133fb4dd081 12,51-52,245,253,288-289,291-293,295-296,299-312,314-316,318-320,323-332,467,475
+  s_967db03fced08f::t_d4b603a83ef376 166-187
+  s_967db03fced08f::t_0c9d5261b184aa 130,134-135
+  s_967db03fced08f::t_e4fde87bb1d303 4,385-436,452-454,456-458
+  s_967db03fced08f::t_27dbfa752f8b2b 53-59,246,250,254-255,290,294,297-298,313,317,321-322,468,472,476
+  s_967db03fced08f::t_6ccae05ec3745b 11,159-163
+  s_967db03fced08f::t_5de1ef4cfb7971 122-129,131-133,136-158,164-165
+  s_967db03fced08f::t_dab01ea231564a 270-287
+  s_967db03fced08f::t_a6df025c983aa3 333,335-384,437-438,461-462
+  s_967db03fced08f::t_ac0caf3ea8b76e 460
+  s_967db03fced08f::t_8bb3cec04eaa13 334
+  s_967db03fced08f::t_40d46d1d0f9ba1 451
+  s_967db03fced08f::t_8951de7b0b1d7b 455
+  s_967db03fced08f::t_c05899624fba74 459
+  s_967db03fced08f::t_7ebf9ac1fb8bce 463
+src/cli.js
+  s_967db03fced08f::t_b9e91c4d0eb97f 17,37,131
+  s_967db03fced08f::t_c4a2559582609a 41
+  s_967db03fced08f::t_eefd18138d1be2 14,28,42-43,133-134,147-149
+  s_967db03fced08f::t_e51133fb4dd081 132
+src/codex-runner.js
+  s_967db03fced08f::t_d71f9c8f5038bd 7,183
+test/clean-environment.test.js
+  s_967db03fced08f::t_d317749e2f2db6 13-34
+  s_967db03fced08f::t_3c78b78af896ed 10-12
+  s_967db03fced08f::t_d4843a164e9940 35-37
+  s_967db03fced08f::t_a1d3ee3c9236c1 1-9,38-44
+src/evolution.js
+  s_967db03fced08f::t_b9e91c4d0eb97f 261-262
+  s_967db03fced08f::t_971bd46d1fe08b 71-86,272-277,279-285,287,423,482
+  s_967db03fced08f::t_9661188eae2f84 461-465
+  s_967db03fced08f::t_e399753d0f3d99 466-479
+  s_967db03fced08f::t_f31d8f93fafe01 450
+  s_967db03fced08f::t_c4a2559582609a 266-271,288-289
+  s_967db03fced08f::t_c4c3e1be96e0af 92,256,260,278,286,387-399,429
+src/index.js
+  s_967db03fced08f::t_3d22521788f10a 381,405,888,892,897,1101
+  s_967db03fced08f::t_f31d8f93fafe01 1017-1018,1098-1100,1102-1107,1113
+  s_967db03fced08f::t_971bd46d1fe08b 10,1341
+  s_967db03fced08f::t_0c9d5261b184aa 380,527,926,942
+  s_967db03fced08f::t_b8b7ff6deda79e 467-478,542
+  s_967db03fced08f::t_f463fe1035b55e 891,893-894,896,898-899
+  s_967db03fced08f::t_5305941acaadb0 320,379,404,876-887,889-890,895,904,921,963,1006,1011
+README.md
+  s_967db03fced08f::t_27dbfa752f8b2b 177-178,183-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a6ba9e693f99fe4cae4ba362cfab9d5279a55bbc",
+  "prompts": {},
+  "sessions": {
+    "s_967db03fced08f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07a6f-92dd-7603-9ab7-3bc04e813070",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
