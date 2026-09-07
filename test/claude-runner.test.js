@@ -51,6 +51,16 @@ process.stdout.write(records.map(JSON.stringify).join("\\n") + "\\n");
   ]);
 });
 
+test("Claude runner rejects source-session environment overlays before launch", async () => {
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-claude-clean-env-"));
+  const runner = createClaudeRunner({
+    executable: "must-not-launch",
+    env: { JFT0M_AGENT_CONVERSATION_ID: "source-conversation" },
+    timeoutMs: 10_000
+  });
+  await assert.rejects(runner({ systemPrompt: "skill", input: {}, workdir, tools: [], model: { id: "model" } }), /must not define source-session environment key/u);
+});
+
 test("Claude runner preserves partial stream diagnostics on timeout", async () => {
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-claude-timeout-"));
   const script = path.join(workdir, "fake-claude.cjs");

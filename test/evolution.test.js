@@ -1,13 +1,15 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
 const { execute } = require("../src/cli");
-const { configureEvolution, evolveWorkspace } = require("../src/evolution");
+const { configureEvolution, evolveWorkspace, statusWorkspaceEvolution } = require("../src/evolution");
+const { validateDataset } = require("../src/index");
 const { createCapabilityRegistry } = require("../src/runtime-capabilities");
 const { createCommandExitScorer } = require("../src/command-scorer");
 const { initWorkspace } = require("../src/workspace");
@@ -44,6 +46,15 @@ const setupEmpty = async () => {
   const datasetPath = path.join(workspace, "dataset.json");
   await fs.writeFile(datasetPath, `${JSON.stringify({ schema: "wikiskill.dataset.v1", domain: "empty-test", tasks: tasks() }, null, 2)}\n`);
   return { workspace, stateRoot, datasetPath };
+};
+
+const digestForDataset = async (datasetPath) => validateDataset(JSON.parse(await fs.readFile(datasetPath, "utf8"))).digest;
+
+const baselineFor = async (workspace, targetSkill, empty = false) => {
+  const output = [];
+  const code = await execute(["evolution", "baseline", "--workspace", workspace, "--target", targetSkill, ...(empty ? ["--empty"] : []), "--json"], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 0, output.join(""));
+  return JSON.parse(output.join("")).data;
 };
 
 const adapter = {
@@ -108,6 +119,72 @@ test("explicit dataset runs the paper loop and stages a strict-gain candidate", 
   assert.equal(await fs.access(path.join(workspace, result.rawRef, "raw", "traces")).then(() => true), true);
 });
 
+test("result indexes fresh Inference and learning-role Provider sessions", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  let inferenceIndex = 0;
+  const auditedRunner = async (input) => ({
+    ...(await runner(input)),
+    provider: { ref: "provider:claude", modelId: "test-model", sessionId: `inference-session-${++inferenceIndex}` }
+  });
+  const auditedMaintainer = async (input) => {
+    await input.recordInvocation({ schema: "wikiskill.learning-invocation.v1", launchRef: "learning:1:1:maintainer", role: "maintainer", provider: { ref: "provider:claude", modelId: "test-model", sessionId: "maintainer-session" } });
+    return maintainer(input);
+  };
+  const auditedProposer = async (input) => {
+    await input.recordInvocation({ schema: "wikiskill.learning-invocation.v1", launchRef: "learning:1:1:proposer-select", role: "proposer-select", provider: { ref: "provider:claude", modelId: "test-model", sessionId: "proposer-select-session" } });
+    await input.recordInvocation({ schema: "wikiskill.learning-invocation.v1", launchRef: "learning:1:1:proposer", role: "proposer", provider: { ref: "provider:claude", modelId: "test-model", sessionId: "proposer-session" } });
+    return proposer(input);
+  };
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:test",
+    stateRoot,
+    runId: "runtime-session-evidence",
+    adapter,
+    runner: auditedRunner,
+    maintainer: auditedMaintainer,
+    proposer: auditedProposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+  const runtimeEvidence = JSON.parse(await fs.readFile(path.join(result.runRoot, "result", "runtime-evidence.json"), "utf8"));
+  assert.equal(runtimeEvidence.schema, "wikiskill.runtime-evidence.v1");
+  assert.equal(runtimeEvidence.inference.length, inferenceIndex);
+  assert.equal(new Set(runtimeEvidence.inference.map((item) => item.provider.sessionId)).size, inferenceIndex);
+  assert.deepEqual(runtimeEvidence.learning.map((item) => item.role), ["maintainer", "proposer-select", "proposer"]);
+  assert.equal(JSON.stringify(runtimeEvidence).includes("SYSTEM SKILL"), false);
+  assert.match(result.runtimeEvidenceDigest, /^sha256:[0-9a-f]{64}$/u);
+  const status = await statusWorkspaceEvolution(workspace, result.runId, { stateRoot });
+  assert.deepEqual(status.runtimeEvidence, runtimeEvidence);
+
+  await fs.writeFile(path.join(result.runRoot, "result", "runtime-evidence.json"), `${JSON.stringify({ ...runtimeEvidence, runId: "tampered" }, null, 2)}\n`);
+  await assert.rejects(statusWorkspaceEvolution(workspace, result.runId, { stateRoot }), /runtime evidence digest mismatch/u);
+});
+
+test("blocks reuse of one Provider session across evolution invocations", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const reusedRunner = async (input) => ({
+    ...(await runner(input)),
+    provider: { ref: "provider:claude", modelId: "test-model", sessionId: "reused-session" }
+  });
+  await assert.rejects(evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:test",
+    stateRoot,
+    runId: "reused-runtime-session",
+    adapter,
+    runner: reusedRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  }), /Provider session was reused within one evolution run/u);
+});
+
 test("equal validation score rolls back Skills while retaining Wiki", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   const equalAdapter = { ...adapter, score: () => ({ score: 0, evidence: { matched: false } }) };
@@ -165,11 +242,17 @@ const writeModules = async (workspace) => {
 test("public CLI runs an explicit dataset without creating dataset views", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   await configureEvolution(workspace, await writeModules(workspace));
+  const datasetDigest = await digestForDataset(datasetPath);
+  const baseline = await baselineFor(workspace, "target-skill");
   const output = [];
   const code = await execute([
     "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
     "--target", "target-skill",
     "--dataset", datasetPath,
+    "--expected-dataset-digest", datasetDigest,
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
     "--scorer", "scorer:test",
@@ -184,6 +267,175 @@ test("public CLI runs an explicit dataset without creating dataset views", async
   assert.equal(await fs.access(path.join(workspace, ".wikiskill/evaluations/datasets")).then(() => true, () => false), false);
 });
 
+test("public CLI inspects the clean-start Skill and Wiki baseline without creating evolution state", async () => {
+  const { workspace, stateRoot } = await setup();
+  const output = [];
+  const code = await execute([
+    "evolution", "baseline",
+    "--workspace", workspace,
+    "--target", "target-skill",
+    "--json"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 0, output.join(""));
+  const baseline = JSON.parse(output.join("")).data;
+  assert.equal(baseline.schema, "wikiskill.evolution-baseline.v1");
+  assert.equal(baseline.targetSkill, "target-skill");
+  assert.match(baseline.targetSkillDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.match(baseline.wikiDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
+test("public CLI requires a prepared dataset digest", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  const output = [];
+  const code = await execute([
+    "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
+    "--target", "target-skill",
+    "--dataset", datasetPath,
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
+    "--provider", "claude",
+    "--model", "test-model",
+    "--scorer", "scorer:test",
+    "--state-root", stateRoot,
+    "--run-id", "missing-prepared-digest",
+    "--json-events"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.match(output.join(""), /requires --expected-dataset-digest/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
+test("public CLI rejects a prepared dataset digest mismatch", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  const output = [];
+  const code = await execute([
+    "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
+    "--target", "target-skill",
+    "--dataset", datasetPath,
+    "--expected-dataset-digest", "0".repeat(64),
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
+    "--provider", "claude",
+    "--model", "test-model",
+    "--scorer", "scorer:test",
+    "--state-root", stateRoot,
+    "--run-id", "mismatched-prepared-digest",
+    "--json-events"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.match(output.join(""), /Dataset digest differs from the prepared input/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
+test("public CLI rejects target Skill drift from the prepared baseline", async () => {
+  const { workspace, stateRoot, skillRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  const datasetDigest = await digestForDataset(datasetPath);
+  await fs.appendFile(path.join(skillRoot, "SKILL.md"), "\nUnreviewed drift.\n");
+  const output = [];
+  const code = await execute([
+    "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
+    "--target", "target-skill",
+    "--dataset", datasetPath,
+    "--expected-dataset-digest", datasetDigest,
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
+    "--provider", "claude",
+    "--model", "test-model",
+    "--scorer", "scorer:test",
+    "--state-root", stateRoot,
+    "--run-id", "target-skill-drift",
+    "--json-events"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.match(output.join(""), /Target Skill digest differs from the prepared baseline/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
+test("public CLI rejects persistent Wiki drift from the prepared baseline", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  const datasetDigest = await digestForDataset(datasetPath);
+  await fs.appendFile(path.join(workspace, ".wikiskill", "wiki", "index.md"), "\nUnreviewed drift.\n");
+  const output = [];
+  const code = await execute([
+    "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
+    "--target", "target-skill",
+    "--dataset", datasetPath,
+    "--expected-dataset-digest", datasetDigest,
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
+    "--provider", "claude",
+    "--model", "test-model",
+    "--scorer", "scorer:test",
+    "--state-root", stateRoot,
+    "--run-id", "wiki-drift",
+    "--json-events"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.match(output.join(""), /Wiki digest differs from the prepared baseline/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
+test("rechecks the actual frozen Skill snapshot after initial baseline validation", async () => {
+  const { workspace, stateRoot, skillRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  await assert.rejects(evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    expectedDatasetDigest: await digestForDataset(datasetPath),
+    expectedWorkspaceId: baseline.workspaceId,
+    expectedTargetSkillDigest: baseline.targetSkillDigest,
+    expectedWikiDigest: baseline.wikiDigest,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:test",
+    stateRoot,
+    runId: "frozen-target-drift",
+    adapter,
+    runner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    onEvent: (event) => {
+      if (event.type === "evolution.dataset-selected") fsSync.appendFileSync(path.join(skillRoot, "SKILL.md"), "\nConcurrent drift.\n");
+    }
+  }), /Frozen target Skill digest differs from the prepared baseline/u);
+  assert.equal(await fs.access(path.join(stateRoot, "engine", "runs")).then(() => true, () => false), false);
+});
+
+test("rechecks the actual frozen Wiki snapshot after initial baseline validation", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  await assert.rejects(evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    expectedDatasetDigest: await digestForDataset(datasetPath),
+    expectedWorkspaceId: baseline.workspaceId,
+    expectedTargetSkillDigest: baseline.targetSkillDigest,
+    expectedWikiDigest: baseline.wikiDigest,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:test",
+    stateRoot,
+    runId: "frozen-wiki-drift",
+    adapter,
+    runner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    onEvent: (event) => {
+      if (event.type === "evolution.dataset-selected") fsSync.appendFileSync(path.join(workspace, ".wikiskill", "wiki", "index.md"), "\nConcurrent drift.\n");
+    }
+  }), /Frozen Wiki digest differs from the prepared baseline/u);
+  assert.equal(await fs.access(path.join(stateRoot, "engine", "runs")).then(() => true, () => false), false);
+});
+
 test("explicit dataset rejects a scorer mismatch before run creation", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   await assert.rejects(evolveWorkspace(workspace, "target-skill", {
@@ -196,14 +448,32 @@ test("explicit dataset rejects a scorer mismatch before run creation", async () 
   assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
 });
 
+test("explicit dataset rejects a prepared digest mismatch before run creation", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  await assert.rejects(evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    expectedDatasetDigest: "0".repeat(64),
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:test",
+    stateRoot
+  }), /Dataset digest differs from the prepared input/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
 test("public empty mode creates, applies, and rolls back the first Skill", async () => {
   const { workspace, stateRoot, datasetPath } = await setupEmpty();
   await configureEvolution(workspace, await writeModules(workspace));
+  const datasetDigest = await digestForDataset(datasetPath);
+  const baseline = await baselineFor(workspace, "target-skill", true);
   const output = [];
   const code = await execute([
     "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
     "--target", "target-skill",
     "--dataset", datasetPath,
+    "--expected-dataset-digest", datasetDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
     "--scorer", "scorer:test",

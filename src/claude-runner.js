@@ -1,6 +1,7 @@
 "use strict";
 
 const { spawn } = require("node:child_process");
+const { createCleanProviderEnvironment } = require("./clean-environment");
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CODING_OUTPUT_BYTES = 32 * 1024 * 1024;
@@ -54,7 +55,13 @@ const createClaudeRunner = (config = {}) => {
     const permissionArgs = development ? ["--dangerously-skip-permissions"] : ["--permission-mode", "dontAsk"];
     const toolList = development ? "Bash,Edit,Read,Glob,Grep,Write" : "";
     const args = [...executableArgs, "-p", prompt, "--output-format", development ? "stream-json" : "json", ...(development ? ["--verbose"] : []), "--json-schema", outputSchema(predictionSchema), "--append-system-prompt", systemPrompt, "--model", model.id.trim(), "--tools", toolList, ...permissionArgs, "--no-session-persistence"];
-    const child = spawn(executable, args, { cwd: workdir, env: { ...process.env, ...(environment || {}), ...(config.env || {}) }, stdio: ["ignore", "pipe", "pipe"] });
+    let providerEnvironment;
+    try {
+      providerEnvironment = createCleanProviderEnvironment(process.env, environment, config.env);
+    } catch (error) {
+      return reject(error);
+    }
+    const child = spawn(executable, args, { cwd: workdir, env: providerEnvironment, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;

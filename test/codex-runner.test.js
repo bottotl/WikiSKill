@@ -110,6 +110,16 @@ process.stdin.on("end", () => {
   ]);
 });
 
+test("Codex runner rejects source-session environment overlays before launch", async () => {
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-codex-clean-env-"));
+  const runner = createCodexRunner({
+    executable: "must-not-launch",
+    env: { JFT0M_AGENT_CONVERSATION_ID: "source-conversation" },
+    timeoutMs: 10_000
+  });
+  await assert.rejects(runner({ systemPrompt: "skill", input: {}, workdir, tools: [], model: { id: "model" } }), /must not define source-session environment key/u);
+});
+
 test("Codex runner rejects JSONL schema drift instead of accepting an unknown event", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-codex-schema-drift-"));
   const workdir = path.join(root, "workdir");

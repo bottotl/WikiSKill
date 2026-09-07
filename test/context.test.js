@@ -34,6 +34,20 @@ test("prepares an immutable Skill context and records consumption", async () => 
   assert.deepEqual((await listContextSkillReceipts(workspace, prepared.contextId)).receipts, [receipt]);
 });
 
+test("uses one stable Skill-set digest across independent frozen contexts", async () => {
+  const { workspace, skillRoot } = await setup();
+  const first = await prepareContext(workspace);
+  const second = await prepareContext(workspace);
+  assert.notEqual(first.contextId, second.contextId);
+  assert.notEqual(first.contractDigest, second.contractDigest);
+  assert.match(first.skills.bundleDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.equal(first.skills.bundleDigest, second.skills.bundleDigest);
+
+  await fs.appendFile(path.join(skillRoot, "SKILL.md"), "\nNew stable guidance.\n");
+  const changed = await prepareContext(workspace);
+  assert.notEqual(changed.skills.bundleDigest, first.skills.bundleDigest);
+});
+
 test("context CLI exposes prepare, skill-get, and receipt", async () => {
   const { workspace } = await setup();
   const invoke = async (args) => {

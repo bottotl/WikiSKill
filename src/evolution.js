@@ -68,11 +68,28 @@ const loadWorkspace = async (workspaceInput) => {
   return { workspace, config };
 };
 
+async function inspectEvolutionBaseline(workspaceInput, targetSkill, { empty = false } = {}) {
+  if (!SAFE_ID.test(targetSkill || "")) throw new Error("Evolution target must be a safe Skill id.");
+  const { workspace, config } = await loadWorkspace(workspaceInput);
+  const targetRoot = path.join(workspace, ".wikiskill", "skills", targetSkill);
+  const targetExists = await exists(path.join(targetRoot, "SKILL.md"));
+  if (empty && targetExists) throw new Error(`Empty evolution target already exists: ${targetSkill}`);
+  if (!empty && !targetExists) throw new Error(`Live target Skill does not exist: ${targetSkill}`);
+  return {
+    schema: "wikiskill.evolution-baseline.v1",
+    workspaceId: config.workspaceId,
+    targetSkill,
+    targetSkillDigest: empty ? null : await treeDigest(targetRoot),
+    wikiDigest: await treeDigest(path.join(workspace, ".wikiskill", "wiki"))
+  };
+}
+
 const initializeSourceRepo = async (workspace, sourceRoot, { empty = false } = {}) => {
   await fs.mkdir(sourceRoot, { recursive: true });
   const skillsRoot = path.join(sourceRoot, ".wikiskill", "skills");
   await fs.mkdir(skillsRoot, { recursive: true });
   if (!empty) await copyTree(path.join(workspace, ".wikiskill", "skills"), skillsRoot);
+  await copyTree(path.join(workspace, ".wikiskill", "wiki"), path.join(sourceRoot, ".wikiskill", "wiki"));
   execFileSync("git", ["init", "-q", "-b", "main", sourceRoot]);
   execFileSync("git", ["-C", sourceRoot, "config", "user.email", "wikiskill@example.invalid"]);
   execFileSync("git", ["-C", sourceRoot, "config", "user.name", "WikiSkill"]);
@@ -235,19 +252,41 @@ const initializeTaskRepository = (workdir) => {
 };
 
 async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
-  if (!SAFE_ID.test(targetSkill || "")) throw new Error("Evolution target must be a safe Skill id.");
   const { workspace, config } = await loadWorkspace(workspaceInput);
+  const observedBaseline = await inspectEvolutionBaseline(workspace, targetSkill, { empty: options.empty === true });
   const targetRoot = path.join(workspace, ".wikiskill", "skills", targetSkill);
-  const targetExists = await exists(path.join(targetRoot, "SKILL.md"));
-  if (options.empty && targetExists) throw new Error(`Empty evolution target already exists: ${targetSkill}`);
-  if (!options.empty && !targetExists) throw new Error(`Live target Skill does not exist: ${targetSkill}`);
   const runId = options.runId || `evolve-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
   if (!SAFE_ID.test(runId)) throw new Error("Evolution run id must be a safe identifier.");
-  const baselineSkillDigest = options.empty ? null : await treeDigest(targetRoot);
-  const baselineWikiDigest = await treeDigest(path.join(workspace, ".wikiskill", "wiki"));
+  if (options.expectedWorkspaceId !== undefined && observedBaseline.workspaceId !== options.expectedWorkspaceId) {
+    throw new Error("WikiSkill workspace identity differs from the prepared baseline; evolution launch is blocked.");
+  }
   if (!options.datasetPath) throw new Error("Evolution requires --dataset.");
   const explicit = await loadExplicitDataset(options.datasetPath, { provider: options.provider, modelId: options.modelId, scorerRef: options.scorerRef });
   const selection = explicit.selection;
+  if (options.expectedDatasetDigest !== undefined) {
+    if (typeof options.expectedDatasetDigest !== "string" || !/^[0-9a-f]{64}$/u.test(options.expectedDatasetDigest)) {
+      throw new Error("Expected dataset digest must be a lowercase SHA-256 hex digest.");
+    }
+    if (selection.datasetDigest !== options.expectedDatasetDigest) {
+      throw new Error("Dataset digest differs from the prepared input; evolution launch is blocked.");
+    }
+  }
+  if (options.expectedTargetSkillDigest !== undefined) {
+    if (typeof options.expectedTargetSkillDigest !== "string" || !SHA256.test(options.expectedTargetSkillDigest)) {
+      throw new Error("Expected target Skill digest must be a sha256 digest.");
+    }
+    if (observedBaseline.targetSkillDigest !== options.expectedTargetSkillDigest) {
+      throw new Error("Target Skill digest differs from the prepared baseline; evolution launch is blocked.");
+    }
+  }
+  if (options.expectedWikiDigest !== undefined) {
+    if (typeof options.expectedWikiDigest !== "string" || !SHA256.test(options.expectedWikiDigest)) {
+      throw new Error("Expected Wiki digest must be a sha256 digest.");
+    }
+    if (observedBaseline.wikiDigest !== options.expectedWikiDigest) {
+      throw new Error("Wiki digest differs from the prepared baseline; evolution launch is blocked.");
+    }
+  }
   options.onEvent?.({
     schema: "wikiskill.event.v1",
     type: "evolution.dataset-selected",
@@ -345,6 +384,19 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   const stateRoot = path.resolve(options.stateRoot || process.env.WIKISKILL_HOME || path.join(os.homedir(), ".wikiskill"));
   const sourceRoot = path.join(stateRoot, "workspaces", config.workspaceId, "evolutions", runId, "source");
   await initializeSourceRepo(workspace, sourceRoot, { empty: options.empty === true });
+  const baselineSkillDigest = options.empty ? null : await treeDigest(path.join(sourceRoot, ".wikiskill", "skills", targetSkill));
+  const baselineWikiDigest = await treeDigest(path.join(sourceRoot, ".wikiskill", "wiki"));
+  try {
+    if (options.expectedTargetSkillDigest !== undefined && baselineSkillDigest !== options.expectedTargetSkillDigest) {
+      throw new Error("Frozen target Skill digest differs from the prepared baseline; evolution launch is blocked.");
+    }
+    if (options.expectedWikiDigest !== undefined && baselineWikiDigest !== options.expectedWikiDigest) {
+      throw new Error("Frozen Wiki digest differs from the prepared baseline; evolution launch is blocked.");
+    }
+  } catch (error) {
+    await fs.rm(path.dirname(sourceRoot), { recursive: true, force: true });
+    throw error;
+  }
   const allSkillDirectories = (await fs.readdir(path.join(sourceRoot, ".wikiskill", "skills"), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name);
   const runConfig = {
     repo: sourceRoot,
@@ -368,13 +420,13 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     model,
     ...(runtime ? { runtime } : {}),
     frozenComponents,
-    configDigest: digest(json({ datasetDigest: selection.datasetDigest, targetSkill, baselineSkillDigest, frozenComponents, rolloutPolicy })),
+    configDigest: digest(json({ datasetDigest: selection.datasetDigest, targetSkill, baselineSkillDigest, baselineWikiDigest, frozenComponents, rolloutPolicy })),
     rawReferencePrefix: `.wikiskill/raw/evolutions/${runId}`
   };
   const core = require("./index");
   const manifest = await core.createRun(runConfig);
   await fs.rm(path.join(manifest.runRoot, "wiki"), { recursive: true, force: true });
-  await copyTree(path.join(workspace, ".wikiskill", "wiki"), path.join(manifest.runRoot, "wiki"));
+  await copyTree(path.join(sourceRoot, ".wikiskill", "wiki"), path.join(manifest.runRoot, "wiki"));
   await fs.mkdir(path.join(manifest.runRoot, "wiki", "patterns"), { recursive: true });
   options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.created", runId, datasetId: selection.datasetId });
   let completed;
@@ -395,7 +447,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   if (runError) throw runError;
   const candidate = await stageCandidate(workspace, manifest.runRoot, targetSkill, baselineSkillDigest, completed.state);
   options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.completed", runId, candidateId: candidate?.candidateId ?? null });
-  return { runId, runRoot: manifest.runRoot, datasetId: selection.datasetId, rawRef, wiki, candidate, state: completed.state };
+  return { runId, runRoot: manifest.runRoot, datasetId: selection.datasetId, rawRef, wiki, candidate, state: completed.state, runtimeEvidenceDigest: completed.runtimeEvidenceDigest };
 }
 
 async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
@@ -406,7 +458,25 @@ async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
   const status = await core.statusRun(runId, path.join(root, "engine"));
   const expectedSource = path.join(root, "workspaces", config.workspaceId, "evolutions", runId, "source");
   if (path.resolve(status.manifest.repo) !== expectedSource) throw new Error("Evolution run does not belong to this workspace identity.");
-  return { runId, manifest: status.manifest, state: status.state };
+  const resultPath = path.join(status.runRoot, "result", "result.json");
+  const result = await fs.readFile(resultPath, "utf8").then(JSON.parse, (error) => {
+    if (error.code === "ENOENT") return undefined;
+    throw error;
+  });
+  let runtimeEvidence;
+  if (result) {
+    const hasRuntimeRef = typeof result.runtimeEvidence === "string";
+    const hasRuntimeDigest = typeof result.runtimeEvidenceDigest === "string";
+    if (hasRuntimeRef !== hasRuntimeDigest) throw new Error("WikiSkill result has an incomplete runtime evidence reference.");
+    if (hasRuntimeRef) {
+      if (result.runtimeEvidence !== "runtime-evidence.json" || !SHA256.test(result.runtimeEvidenceDigest)) throw new Error("WikiSkill result runtime evidence reference is invalid.");
+      const runtimeText = await fs.readFile(path.join(status.runRoot, "result", result.runtimeEvidence), "utf8");
+      if (digest(runtimeText) !== result.runtimeEvidenceDigest) throw new Error("WikiSkill runtime evidence digest mismatch.");
+      runtimeEvidence = JSON.parse(runtimeText);
+      if (runtimeEvidence?.schema !== "wikiskill.runtime-evidence.v1" || runtimeEvidence.runId !== runId) throw new Error("WikiSkill runtime evidence identity is invalid.");
+    }
+  }
+  return { runId, manifest: status.manifest, state: status.state, ...(result ? { result } : {}), ...(runtimeEvidence ? { runtimeEvidence } : {}) };
 }
 
-module.exports = { configureEvolution, evolveWorkspace, statusWorkspaceEvolution };
+module.exports = { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution };

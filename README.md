@@ -174,11 +174,15 @@ WikiSkill 只把 `input` 和 `outputSchema` 传给 Inference Agent；ground trut
 
 ```sh
 wikiskill dataset validate --dataset dataset.json --scorer builtin:exact-output-v1 --json
-wikiskill evolve --workspace . --target <skill-id> --dataset dataset.json --provider claude --model <model-id> --scorer builtin:exact-output-v1 --json-events
+wikiskill evolution baseline --workspace . --target <skill-id> --json
+wikiskill evolve --workspace . --expected-workspace-id <workspace-id> --target <skill-id> --dataset dataset.json --expected-dataset-digest <validated-dataset-digest> --expected-target-skill-digest <baseline-skill-digest> --expected-wiki-digest <baseline-wiki-digest> --provider claude --model <model-id> --scorer builtin:exact-output-v1 --json-events
 wikiskill status --workspace . --run <run-id> --json
 ```
 
 使用 `--empty` 可以从空的 S0/W0 创建第一个 Skill。
+上层产品必须先执行 `dataset validate` 和 `evolution baseline`，再把返回的 workspace、
+dataset、target Skill 和 Wiki 摘要传入 `evolve`。任一 authority 在准备后发生变化，
+都会在创建 evolution run 前被阻断。
 
 ## Coding Task
 

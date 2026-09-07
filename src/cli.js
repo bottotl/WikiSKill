@@ -11,9 +11,10 @@ wikiskill context prepare --workspace <workspace> --json
 wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipts --workspace <workspace> --context <id> --json
+wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empty] --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
-wikiskill evolve --workspace <workspace> --target <skill-id> --dataset <dataset.json> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
+wikiskill evolve --workspace <workspace> --expected-workspace-id <id> --target <skill-id> --dataset <dataset.json> --expected-dataset-digest <sha256> [--expected-target-skill-digest <sha256>] --expected-wiki-digest <sha256> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
 wikiskill candidate diff --workspace <workspace> --candidate <id> --json
@@ -24,6 +25,7 @@ wikiskill rollback --workspace <workspace> --receipt <id> --json
 const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
+  evolution: new Set(["baseline"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate"])
 });
@@ -32,9 +34,13 @@ const VALUE_FLAGS = Object.freeze({
   "--run-id": "runId",
   "--run": "run",
   "--workspace": "workspace",
+  "--expected-workspace-id": "expectedWorkspaceId",
   "--mode": "mode",
   "--input": "input",
   "--dataset": "datasetPath",
+  "--expected-dataset-digest": "expectedDatasetDigest",
+  "--expected-target-skill-digest": "expectedTargetSkillDigest",
+  "--expected-wiki-digest": "expectedWikiDigest",
   "--target": "target",
   "--candidate": "candidate",
   "--provider": "provider",
@@ -122,6 +128,10 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       if (options.datasetPath) {
         const runtime = [options.provider, options.modelId, options.scorerRef];
         if (runtime.some((value) => value === undefined)) throw new Error("evolve --dataset requires --provider, --model, and --scorer.");
+        if (!options.expectedWorkspaceId) throw new Error("evolve --dataset requires --expected-workspace-id from evolution baseline.");
+        if (!options.expectedDatasetDigest) throw new Error("evolve --dataset requires --expected-dataset-digest from dataset validate.");
+        if (!options.empty && !options.expectedTargetSkillDigest) throw new Error("evolve --dataset requires --expected-target-skill-digest from evolution baseline.");
+        if (!options.expectedWikiDigest) throw new Error("evolve --dataset requires --expected-wiki-digest from evolution baseline.");
       }
       data = await withAbort((signal) => runEvolutionCommand(options, io, signal, (id) => { emittedRunId = id; }));
       io.stdout(`${JSON.stringify({ schema: "wikiskill.event.v1", type: "evolution.result", runId: data.runId, data })}\n`);
@@ -134,6 +144,9 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       else if (options.subcommand === "receipt") data = await core.recordContextSkillUse(options.workspace, options.contextId, options.skillId);
       else if (options.subcommand === "receipts") data = await core.listContextSkillReceipts(options.workspace, options.contextId);
       else throw new Error("Only `context prepare`, `context skill-get`, `context receipt`, and `context receipts` are supported.");
+    } else if (options.command === "evolution") {
+      if (options.subcommand !== "baseline") throw new Error("Only `evolution baseline` is supported.");
+      data = await core.inspectEvolutionBaseline(options.workspace, options.target, { empty: options.empty === true });
     } else if (options.command === "bootstrap") {
       if (options.subcommand !== "install" && options.subcommand !== "uninstall") throw new Error("Only `bootstrap install` and `bootstrap uninstall` are supported.");
       if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");

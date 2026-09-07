@@ -4,6 +4,7 @@ const childProcess = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { createCleanProviderEnvironment } = require("./clean-environment");
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 300_000;
@@ -28,12 +29,12 @@ const terminate = (child) => {
   child.kill("SIGTERM");
 };
 
-const executeCodex = (spawn, executable, args, prompt, cwd, timeoutMs) => new Promise((resolve, reject) => {
+const executeCodex = (spawn, executable, args, prompt, cwd, timeoutMs, env) => new Promise((resolve, reject) => {
   let child;
   try {
     child = spawn(executable, args, {
       cwd,
-      env: process.env,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       detached: process.platform !== "win32"
     });
@@ -96,8 +97,20 @@ const parseObject = (value, role) => {
   }
 };
 
+const providerFromJsonl = (stdout, role, modelId) => {
+  const events = stdout.trim().split(/\r?\n/u).filter(Boolean).map((line, index) => {
+    try { return JSON.parse(line); } catch { throw new Error(`WikiSkill Codex ${role} returned invalid JSONL at line ${index + 1}.`); }
+  });
+  const sessions = events.flatMap((event) => event?.type === "thread.started" && typeof event.thread_id === "string" && event.thread_id.trim() ? [event.thread_id.trim()] : []);
+  if (sessions.length !== 1 || events.filter((event) => event?.type === "turn.completed").length !== 1 || events.some((event) => event?.type === "turn.failed")) {
+    throw new Error(`WikiSkill Codex ${role} did not return one successful session.`);
+  }
+  return { ref: "provider:codex", modelId, sessionId: sessions[0] };
+};
+
 const runLearningTurn = async (role, config, prompt, cwd, deps = {}) => {
   const executable = typeof config.executable === "string" && config.executable.trim() ? config.executable.trim() : "codex";
+  if (typeof config.model !== "string" || !config.model.trim()) throw new Error("WikiSkill Codex learning requires a frozen model id.");
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), `wikiskill-${role}-`));
   const outputPath = path.join(temporaryRoot, "output.json");
   const args = [
@@ -115,10 +128,19 @@ const runLearningTurn = async (role, config, prompt, cwd, deps = {}) => {
     "-"
   ];
   try {
-    const result = await executeCodex(deps.spawn ?? childProcess.spawn, executable, args, prompt, cwd, timeoutFor(config));
+    const result = await executeCodex(
+      deps.spawn ?? childProcess.spawn,
+      executable,
+      args,
+      prompt,
+      cwd,
+      timeoutFor(config),
+      createCleanProviderEnvironment(process.env, config.env)
+    );
     if (result.code !== 0) throw new Error(`WikiSkill Codex ${role} exited with code ${result.code}: ${(result.stderr || result.stdout).trim()}`);
     if (!fs.existsSync(outputPath)) throw new Error(`WikiSkill Codex ${role} did not produce a final response.`);
-    return parseObject(fs.readFileSync(outputPath, "utf8"), role);
+    const response = parseObject(fs.readFileSync(outputPath, "utf8"), role);
+    return { response, provider: providerFromJsonl(result.stdout, role, config.model.trim()) };
   } finally {
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
   }
@@ -167,7 +189,9 @@ const proposerPrompt = (input) => [
 ].join("\n\n");
 
 const createMaintainer = (config = {}, deps = {}) => async (input) => {
-  const response = await runLearningTurn("maintainer", config, maintainerPrompt(input), input.wikiRoot, deps);
+  const turn = await runLearningTurn("maintainer", config, maintainerPrompt(input), input.wikiRoot, deps);
+  const response = turn.response;
+  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: `learning:${input.attempt}:${input.iteration}:maintainer`, role: "maintainer", provider: turn.provider });
   let index;
   if (response.index !== undefined) {
     if (typeof response.index !== "string") throw new Error("WikiSkill Codex maintainer index must be text.");
@@ -195,13 +219,17 @@ const createMaintainer = (config = {}, deps = {}) => async (input) => {
 };
 
 const createProposer = (config = {}, deps = {}) => async (input) => {
-  const selection = await runLearningTurn("proposer-select", config, traceSelectionPrompt(input), input.wikiRoot, deps);
+  const selectionTurn = await runLearningTurn("proposer-select", config, traceSelectionPrompt(input), input.wikiRoot, deps);
+  const selection = selectionTurn.response;
+  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: `learning:${input.attempt}:${input.iteration}:proposer-select`, role: "proposer-select", provider: selectionTurn.provider });
   if (!Array.isArray(selection.traceReads)) throw new Error("WikiSkill Codex proposer selection must return traceReads.");
   const selected = [...new Set(selection.traceReads)];
   const available = new Set(input.availableTraces.map((trace) => trace.id));
   if (selected.length < Math.min(4, input.availableTraces.length) || selected.some((id) => !available.has(id))) throw new Error("WikiSkill Codex proposer selected invalid training traces.");
   const readTraces = selected.map((id) => ({ id, trace: input.readTrace(id) }));
-  const response = await runLearningTurn("proposer", config, proposerPrompt({ ...input, readTraces }), input.wikiRoot, deps);
+  const proposalTurn = await runLearningTurn("proposer", config, proposerPrompt({ ...input, readTraces }), input.wikiRoot, deps);
+  const response = proposalTurn.response;
+  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: `learning:${input.attempt}:${input.iteration}:proposer`, role: "proposer", provider: proposalTurn.provider });
   if (typeof response.action !== "string") throw new Error("WikiSkill Codex proposer response is missing action.");
   return {
     ...response,

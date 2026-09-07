@@ -65,12 +65,14 @@ async function prepareContext(input) {
         await fs.writeFile(destination, content, { encoding: "utf8", flag: "wx" });
       }
     }
+    const inventory = skills.map(({ id, bundleDigest }) => ({ id, bundleDigest }));
+    const skillSetDigest = digest(json(inventory));
     const manifest = {
       schema: "wikiskill.context.v1",
       contextId,
       workspaceId: config.workspaceId,
       createdAt: new Date().toISOString(),
-      inventory: skills.map(({ id, bundleDigest }) => ({ id, bundleDigest }))
+      inventory
     };
     const manifestText = json(manifest);
     await fs.writeFile(path.join(staging, "manifest.json"), manifestText, { flag: "wx" });
@@ -84,6 +86,7 @@ async function prepareContext(input) {
       contractDigest,
       instructions: "Use only Skills from this frozen context. Read a Skill with skills.getCommand and record every consumed Skill with skills.usedCommand.",
       skills: {
+        bundleDigest: skillSetDigest,
         inventory: manifest.inventory,
         getCommand: ["wikiskill", "context", "skill-get", "--workspace", workspace, "--context", contextId, "--skill", "<skill-id>", "--json"],
         usedCommand: ["wikiskill", "context", "receipt", "--workspace", workspace, "--context", contextId, "--skill", "<skill-id>", "--json"]

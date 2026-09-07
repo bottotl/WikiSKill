@@ -21,10 +21,11 @@ const fakeChild = () => {
 const responseSpawn = (response, verifyPrompt) => (_executable, args) => {
   const finalPath = args[args.indexOf("-o") + 1];
   const child = fakeChild();
-  child.stdin.end = (prompt) => {
-    verifyPrompt(prompt, args);
-    fs.writeFileSync(finalPath, JSON.stringify(response), "utf8");
-    child.emit("close", 0, null);
+    child.stdin.end = (prompt) => {
+      verifyPrompt(prompt, args);
+      fs.writeFileSync(finalPath, JSON.stringify(response), "utf8");
+      child.stdout.emit("data", Buffer.from(`${JSON.stringify({ type: "thread.started", thread_id: "learning-session" })}\n${JSON.stringify({ type: "turn.completed" })}\n`));
+      child.emit("close", 0, null);
   };
   return child;
 };
@@ -37,6 +38,7 @@ const responseSequenceSpawn = (responses, verifyPrompt) => {
     child.stdin.end = (prompt) => {
       verifyPrompt(prompt, args, index);
       fs.writeFileSync(finalPath, JSON.stringify(responses[index]), "utf8");
+      child.stdout.emit("data", Buffer.from(`${JSON.stringify({ type: "thread.started", thread_id: `learning-session-${index}` })}\n${JSON.stringify({ type: "turn.completed" })}\n`));
       index += 1;
       child.emit("close", 0, null);
     };
@@ -49,7 +51,7 @@ test("Codex maintainer turns sampled training evidence into constrained Wiki wri
   t.after(() => fs.rmSync(wikiRoot, { recursive: true, force: true }));
   const patterns = [];
   const logs = [];
-  const maintainer = createMaintainer({ timeoutMs: 1_000 }, {
+  const maintainer = createMaintainer({ model: "test-model", timeoutMs: 1_000 }, {
     spawn: responseSpawn({
       appendLog: "observed a stable fallback pattern",
       patterns: [{ name: "gate-fallback.md", content: "# Gate Fallback\n" }]
@@ -78,7 +80,7 @@ test("Codex proposer reads four constrained training traces before returning one
   const wikiRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-codex-proposer-"));
   t.after(() => fs.rmSync(wikiRoot, { recursive: true, force: true }));
   const readIds = [];
-  const proposer = createProposer({ timeoutMs: 1_000 }, {
+  const proposer = createProposer({ model: "test-model", timeoutMs: 1_000 }, {
     spawn: responseSequenceSpawn([
       { traceReads: ["trace-4", "trace-2", "trace-1", "trace-3"] },
       { action: "patch", skillId: "gate-skill", files: { "SKILL.md": "# Gate\nImproved fallback.\n" } }
@@ -110,4 +112,23 @@ test("Codex proposer reads four constrained training traces before returning one
   assert.deepEqual(readIds, ["trace-4", "trace-2", "trace-1", "trace-3"]);
   assert.deepEqual(proposal.traceReads, ["trace-4", "trace-2", "trace-1", "trace-3"]);
   assert.equal(proposal.skillId, "gate-skill");
+});
+
+test("Codex learning rejects source-session environment overlays before launch", async () => {
+  const wikiRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-codex-learning-clean-env-"));
+  const maintainer = createMaintainer({
+    model: "test-model",
+    timeoutMs: 1_000,
+    env: { JFT0M_AGENT_CONVERSATION_ID: "source-conversation" }
+  }, {
+    spawn: () => { throw new Error("must not launch"); }
+  });
+  await assert.rejects(maintainer({
+    wikiRoot,
+    existingWiki: { index: "", log: "", skillImpact: "", patterns: {} },
+    sampledTraces: [],
+    writePattern: () => undefined,
+    patchPattern: () => undefined,
+    appendLog: () => undefined
+  }), /must not define source-session environment key/u);
 });

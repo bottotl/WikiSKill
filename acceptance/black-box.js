@@ -57,10 +57,16 @@ const main = async () => {
     const datasetPath = path.join(fixtureRoot, "dataset.json");
     const fixtureDataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
     assert.deepEqual(Object.fromEntries(["train", "val", "test"].map((split) => [split, fixtureDataset.tasks.filter((task) => task.split === split).length])), { train: 4, val: 2, test: 2 });
+    const datasetDigest = invoke(["dataset", "validate", "--dataset", datasetPath, "--scorer", "scorer:fixture", "--json"], env)[0].data.digest;
+    const baselineState = invoke(["evolution", "baseline", "--workspace", workspace, "--target", "target-skill", "--json"], env)[0].data;
     const events = invoke([
       "evolve", "--workspace", workspace,
+      "--expected-workspace-id", baselineState.workspaceId,
       "--target", "target-skill",
       "--dataset", datasetPath,
+      "--expected-dataset-digest", datasetDigest,
+      "--expected-target-skill-digest", baselineState.targetSkillDigest,
+      "--expected-wiki-digest", baselineState.wikiDigest,
       "--provider", "claude",
       "--model", "fixture-model",
       "--scorer", "scorer:fixture",

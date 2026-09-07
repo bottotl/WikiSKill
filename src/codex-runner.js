@@ -4,6 +4,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { createCleanProviderEnvironment } = require("./clean-environment");
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const KILL_GRACE_MS = 250;
@@ -179,7 +180,7 @@ const createCodexRunner = (config = {}) => {
         executable,
         args,
         workdir,
-        env: { ...process.env, ...(environment || {}), ...(config.env || {}) },
+        env: createCleanProviderEnvironment(process.env, environment, config.env),
         prompt,
         timeoutMs: taskTimeoutMs,
         abortSignal

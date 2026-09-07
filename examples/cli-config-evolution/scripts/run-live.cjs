@@ -86,10 +86,16 @@ async function main(argv = process.argv.slice(2)) {
       return summary;
     }
 
+    const datasetDigest = invoke(["dataset", "validate", "--dataset", datasetPath, "--scorer", "builtin:command-exit-v1", "--json"], env).at(-1).data.digest;
+    const baseline = invoke(["evolution", "baseline", "--workspace", workspace, "--target", targetSkill, "--json"], env).at(-1).data;
     const evolution = invoke([
       "evolve", "--workspace", workspace,
+      "--expected-workspace-id", baseline.workspaceId,
       "--target", targetSkill,
       "--dataset", datasetPath,
+      "--expected-dataset-digest", datasetDigest,
+      "--expected-target-skill-digest", baseline.targetSkillDigest,
+      "--expected-wiki-digest", baseline.wikiDigest,
       "--provider", "codex",
       "--model", options.model,
       "--scorer", "builtin:command-exit-v1",
