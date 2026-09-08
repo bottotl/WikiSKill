@@ -8,6 +8,9 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { createMaintainer, createProposer } = require("../src/codex-learning");
+const { createProviderLaunchBudget } = require("../src/provider-launch-budget");
+
+
 
 const fakeChild = () => {
   const child = new EventEmitter();
@@ -51,21 +54,27 @@ test("Codex maintainer turns sampled training evidence into constrained Wiki wri
   t.after(() => fs.rmSync(wikiRoot, { recursive: true, force: true }));
   const patterns = [];
   const logs = [];
-  const maintainer = createMaintainer({ model: "test-model", timeoutMs: 1_000 }, {
+  const launches = [];
+  const maintainer = createMaintainer({ model: "test-model", reasoningEffort: "low", providerLaunchBudget: { consume: (launch) => launches.push(launch) }, timeoutMs: 1_000 }, {
     spawn: responseSpawn({
       appendLog: "observed a stable fallback pattern",
       patterns: [{ name: "gate-fallback.md", content: "# Gate Fallback\n" }]
     }, (prompt, args) => {
       assert.ok(args.includes("read-only"));
       assert.ok(args.includes("--skip-git-repo-check"));
+      assert.ok(args.includes("model_reasoning_effort=\"low\""));
       assert.equal(args.includes("--ignore-user-config"), false);
       assert.match(prompt, /Wiki Maintainer/u);
+      assert.match(prompt, /自然语言内容使用简体中文/u);
+      assert.match(prompt, /补丁匹配 target 保持原样/u);
       assert.match(prompt, /training-1/u);
       assert.match(prompt, /existing pattern/u);
     })
   });
   await maintainer({
     wikiRoot,
+    attempt: 1,
+    iteration: 1,
     existingWiki: { index: "# Wiki\n", log: "existing pattern\n", skillImpact: "", patterns: {} },
     sampledTraces: [{ taskId: "training-1", split: "train", iteration: 1, score: 0, executionLog: "failed trace" }],
     writePattern: (name, content) => patterns.push({ name, content }),
@@ -74,6 +83,8 @@ test("Codex maintainer turns sampled training evidence into constrained Wiki wri
   });
   assert.deepEqual(patterns, [{ name: "gate-fallback.md", content: "# Gate Fallback\n" }]);
   assert.deepEqual(logs, ["observed a stable fallback pattern"]);
+  assert.equal(launches[0].launchRef, "learning:1:1:maintainer");
+  assert.equal(launches[0].reasoningEffort, "low");
 });
 
 test("Codex proposer reads four constrained training traces before returning one proposal", async (t) => {

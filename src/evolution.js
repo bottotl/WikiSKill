@@ -6,6 +6,8 @@ const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { createBuiltinCapabilityRegistry, learningRefForProvider, runnerRefForProvider } = require("./runtime-capabilities");
+const { createProviderLaunchBudget } = require("./provider-launch-budget");
+const { prepareTaskDependencies } = require("./task-dependencies");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const CONFIG_SCHEMA = "wikiskill.workspace.v1";
@@ -200,7 +202,7 @@ async function configureEvolution(workspaceInput, input, { dryRun = false } = {}
   if (!evolution.runnerModule && !evolution.agentRunner) throw new Error("Evolution config requires runnerModule or agentRunner.");
   if ((!evolution.maintainerModule || !evolution.proposerModule) && !evolution.learningAgent) throw new Error("Evolution config requires Maintainer and Proposer modules or a learningAgent.");
   if (!evolution.model || typeof evolution.model.id !== "string" || !evolution.model.id.trim()) throw new Error("Evolution config requires a model id.");
-  if (!Number.isInteger(evolution.iterationLimit) || evolution.iterationLimit < 1 || evolution.iterationLimit > 3) throw new Error("Evolution config iterationLimit must be between 1 and 3.");
+  if (!Number.isSafeInteger(evolution.iterationLimit) || evolution.iterationLimit < 1) throw new Error("Evolution config iterationLimit must be a positive safe integer.");
   JSON.stringify(evolution);
   const previous = json(config);
   const next = json({ ...config, evolution });
@@ -227,6 +229,9 @@ const loadExplicitDataset = async (datasetPath, runtimeInput) => {
   if (typeof runtimeInput.modelId !== "string" || !runtimeInput.modelId.trim() || typeof runtimeInput.scorerRef !== "string" || !runtimeInput.scorerRef.trim()) {
     throw new Error("Explicit dataset requires model and scorer identities.");
   }
+  if (runtimeInput.toolProfile !== "none" && runtimeInput.toolProfile !== "workspace") throw new Error("Explicit dataset tool profile must be none or workspace.");
+  if (runtimeInput.scorerRef === "builtin:command-exit-v1" && runtimeInput.toolProfile !== "workspace") throw new Error("builtin:command-exit-v1 requires the workspace tool profile.");
+  if (runtimeInput.scorerRef === "builtin:exact-output-v1" && runtimeInput.toolProfile !== "none") throw new Error("builtin:exact-output-v1 requires the none tool profile.");
   const core = require("./index");
   const dataset = core.validateDataset(JSON.parse(await fs.readFile(target, "utf8")));
   if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== runtimeInput.scorerRef)) {
@@ -237,15 +242,17 @@ const loadExplicitDataset = async (datasetPath, runtimeInput) => {
     selection: {
       datasetId: `dataset-${dataset.digest.slice("sha256:".length, "sha256:".length + 24)}`,
       datasetDigest: dataset.digest,
-      cohort: { provider: runtimeInput.provider, modelId: runtimeInput.modelId, scorerRef: runtimeInput.scorerRef }
+      cohort: { provider: runtimeInput.provider, modelId: runtimeInput.modelId, reasoningEffort: runtimeInput.reasoningEffort, scorerRef: runtimeInput.scorerRef, toolProfile: runtimeInput.toolProfile }
     }
   };
 };
 
-const initializeTaskRepository = (workdir) => {
+const initializeTaskRepository = async (workdir, sandbox) => {
+  await prepareTaskDependencies(workdir, sandbox);
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: workdir });
   execFileSync("git", ["config", "user.email", "wikiskill@example.invalid"], { cwd: workdir });
   execFileSync("git", ["config", "user.name", "WikiSkill"], { cwd: workdir });
+  await fs.writeFile(path.join(workdir, ".git", "info", "exclude"), "node_modules/\n");
   execFileSync("git", ["add", "."], { cwd: workdir });
   execFileSync("git", ["commit", "--allow-empty", "-qm", "task baseline"], { cwd: workdir });
   return workdir;
@@ -261,7 +268,21 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     throw new Error("WikiSkill workspace identity differs from the prepared baseline; evolution launch is blocked.");
   }
   if (!options.datasetPath) throw new Error("Evolution requires --dataset.");
-  const explicit = await loadExplicitDataset(options.datasetPath, { provider: options.provider, modelId: options.modelId, scorerRef: options.scorerRef });
+  const reasoningEffort = typeof options.reasoningEffort === "string" && options.reasoningEffort.trim() ? options.reasoningEffort.trim() : "unspecified";
+  if (!/^[A-Za-z0-9._-]+$/u.test(reasoningEffort)) throw new Error("Evolution reasoning effort must be a safe identifier.");
+  const maxProviderLaunches = options.maxProviderLaunches === undefined ? 10_000 : Number(options.maxProviderLaunches);
+  if (!Number.isSafeInteger(maxProviderLaunches) || maxProviderLaunches < 1 || maxProviderLaunches > 10_000) throw new Error("Evolution max Provider launches must be between 1 and 10000.");
+  const stateRoot = path.resolve(options.stateRoot || process.env.WIKISKILL_HOME || path.join(os.homedir(), ".wikiskill"));
+  const launchBudget = createProviderLaunchBudget({
+    root: path.join(stateRoot, "workspaces", config.workspaceId, "evolutions", runId, "accounting"),
+    runId,
+    provider: options.provider,
+    modelId: options.modelId,
+    reasoningEffort,
+    limit: maxProviderLaunches
+  });
+  const toolProfile = options.toolProfile ?? (options.scorerRef === "builtin:command-exit-v1" ? "workspace" : "none");
+  const explicit = await loadExplicitDataset(options.datasetPath, { provider: options.provider, modelId: options.modelId, reasoningEffort, scorerRef: options.scorerRef, toolProfile });
   const selection = explicit.selection;
   if (options.expectedDatasetDigest !== undefined) {
     if (typeof options.expectedDatasetDigest !== "string" || !/^[0-9a-f]{64}$/u.test(options.expectedDatasetDigest)) {
@@ -307,18 +328,27 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   const registry = options.capabilityRegistry || createBuiltinCapabilityRegistry();
   let runtime;
   let runtimeRunner;
+  let runtimeRunnerFrozenConfig;
   let runtimeAdapter;
   let runtimeLearning;
   let runtimeLearningConfig;
+  let runtimeLearningFrozenConfig;
   if (!options.adapter && !adapterModule && !options.runner && !runnerModule && !evolution.agentRunner) {
     const runnerRef = runnerRefForProvider(selection.cohort.provider);
-    const resolvedRunner = registry.resolveRunner(runnerRef, evolution.runtime?.runnerConfig || {});
+    runtimeRunnerFrozenConfig = {
+      ...(evolution.runtime?.runnerConfig || {}),
+      reasoningEffort
+    };
+    const resolvedRunner = registry.resolveRunner(runnerRef, {
+      ...runtimeRunnerFrozenConfig,
+      providerLaunchBudget: launchBudget
+    });
     const resolvedScorer = registry.resolveScorer(selection.cohort.scorerRef, evolution.runtime?.scorerConfig || {});
-    runtime = { runnerRef, scorerRef: selection.cohort.scorerRef, provider: selection.cohort.provider, modelId: selection.cohort.modelId, runner: resolvedRunner.descriptor, scorer: resolvedScorer.descriptor };
+    runtime = { runnerRef, scorerRef: selection.cohort.scorerRef, provider: selection.cohort.provider, modelId: selection.cohort.modelId, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches }, runner: resolvedRunner.descriptor, scorer: resolvedScorer.descriptor };
     runtimeRunner = resolvedRunner.run;
     runtimeAdapter = {
-      prepareEnvironment: ({ workdir }) => runtime.scorerRef === "builtin:command-exit-v1" ? initializeTaskRepository(workdir) : workdir,
-      resolveTools: () => runtime.scorerRef === "builtin:command-exit-v1" ? ["workspace"] : [],
+      prepareEnvironment: ({ workdir, task }) => runtime.scorerRef === "builtin:command-exit-v1" ? initializeTaskRepository(workdir, task.sandbox) : workdir,
+      resolveTools: () => runtime.toolProfile === "workspace" ? ["workspace"] : [],
       disposeEnvironment: ({ workdir }) => runtime.scorerRef === "builtin:command-exit-v1" ? fs.rm(workdir, { recursive: true, force: true }) : undefined,
       score: ({ task, prediction, groundTruth, environment, workdir, split, iteration }) => {
         if (task.evaluator.capabilityRef !== runtime.scorerRef) throw new Error(`Task scorer ref differs from the frozen runtime cohort: ${task.id}`);
@@ -328,9 +358,14 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   }
   if ((!options.maintainer && !maintainerModule && !learningAgent) || (!options.proposer && !proposerModule && !learningAgent)) {
     const learningAgentRef = runtime?.provider ? learningRefForProvider(runtime.provider) : "builtin:codex-cli-v1";
-    runtimeLearningConfig = {
+    runtimeLearningFrozenConfig = {
       ...(evolution.runtime?.learningAgentConfig || {}),
-      ...(runtime?.modelId ? { model: runtime.modelId } : {})
+      ...(runtime?.modelId ? { model: runtime.modelId } : {}),
+      reasoningEffort
+    };
+    runtimeLearningConfig = {
+      ...runtimeLearningFrozenConfig,
+      providerLaunchBudget: launchBudget
     };
     const resolvedLearning = registry.resolveLearningAgent(learningAgentRef, runtimeLearningConfig);
     runtimeLearning = resolvedLearning;
@@ -340,7 +375,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
       learningAgent: resolvedLearning.descriptor
     };
   }
-  const model = options.model || evolution.model || (runtime ? { id: runtime.modelId } : undefined);
+  const model = options.model || evolution.model || (runtime ? { id: runtime.modelId, reasoningEffort } : undefined);
   if (!options.adapter && !adapterModule && !runtimeAdapter) throw new Error("Evolution requires a configured adapter or resolvable runtime scorer capability.");
   if (!options.runner && !runnerModule && !evolution.agentRunner && !runtimeRunner) throw new Error("Evolution requires a configured Agent runner or resolvable runtime runner capability.");
   if (!options.maintainer && !maintainerModule && !learningAgent && !runtimeLearning) throw new Error("Evolution requires a configured Wiki Maintainer.");
@@ -359,6 +394,9 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
       selection: {
         provider: runtime.provider,
         modelId: runtime.modelId,
+        reasoningEffort: runtime.reasoningEffort,
+        toolProfile: runtime.toolProfile,
+        launchBudget: runtime.launchBudget,
         runnerRef: runtime.runnerRef,
         scorerRef: runtime.scorerRef,
         ...(runtime.learningAgentRef ? { learningAgentRef: runtime.learningAgentRef } : {})
@@ -366,22 +404,27 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
       capabilities
     });
   }
-  const iterationLimit = Number(options.iterationLimit || evolution.iterationLimit || 3);
-  if (!Number.isInteger(iterationLimit) || iterationLimit < 1 || iterationLimit > 3) throw new Error("Evolution iteration limit must be an integer between 1 and 3.");
+  const iterationLimit = Number(options.iterationLimit ?? evolution.iterationLimit ?? 3);
+  if (!Number.isSafeInteger(iterationLimit) || iterationLimit < 1) throw new Error("Evolution iteration limit must be a positive safe integer.");
   const frozenComponents = {
     adapter: runtime ? digest(JSON.stringify({ descriptor: runtime.scorer, config: evolution.runtime?.scorerConfig || {} })) : await componentDigest(options.adapter, adapterModule, evolution.adapterConfig),
-    runner: runtime ? digest(JSON.stringify({ descriptor: runtime.runner, config: evolution.runtime?.runnerConfig || {} })) : await componentDigest(options.runner || evolution.agentRunner, runnerModule, evolution.runnerConfig),
-    maintainer: runtimeLearning ? digest(JSON.stringify({ descriptor: runtimeLearning.descriptor, config: runtimeLearningConfig })) : await componentDigest(options.maintainer || learningAgent, maintainerModule, learningAgent),
-    proposer: runtimeLearning ? digest(JSON.stringify({ descriptor: runtimeLearning.descriptor, config: runtimeLearningConfig })) : await componentDigest(options.proposer || learningAgent, proposerModule, learningAgent),
+    runner: runtime ? digest(JSON.stringify({ descriptor: runtime.runner, config: runtimeRunnerFrozenConfig || {} })) : await componentDigest(options.runner || evolution.agentRunner, runnerModule, evolution.runnerConfig),
+    maintainer: runtimeLearning ? digest(JSON.stringify({ descriptor: runtimeLearning.descriptor, config: runtimeLearningFrozenConfig })) : await componentDigest(options.maintainer || learningAgent, maintainerModule, learningAgent),
+    proposer: runtimeLearning ? digest(JSON.stringify({ descriptor: runtimeLearning.descriptor, config: runtimeLearningFrozenConfig })) : await componentDigest(options.proposer || learningAgent, proposerModule, learningAgent),
     model: digest(JSON.stringify(model))
   };
+  // 当前实验设置：小型代码任务重复采样以提供四条真实训练轨迹；不是论文规定的通用采样次数。
   const rolloutPolicy = runtime?.scorerRef === "builtin:command-exit-v1"
-    ? { trainingRolloutsPerTask: 1, evaluationRolloutsPerTask: 1 }
+    ? { trainingRolloutsPerTask: Math.max(1, Math.ceil(4 / tasks.filter(task => task.split === "train").length)), evaluationRolloutsPerTask: 1 }
     : runtimeRunner && runtimeAdapter
       ? { trainingRolloutsPerTask: 2, evaluationRolloutsPerTask: 3 }
     : { trainingRolloutsPerTask: 1, evaluationRolloutsPerTask: 1 };
+  const splitCount = (split) => tasks.filter((task) => task.split === split).length;
+  const estimatedProviderLaunches = splitCount("val") * rolloutPolicy.evaluationRolloutsPerTask
+    + iterationLimit * (splitCount("train") * rolloutPolicy.trainingRolloutsPerTask + 3 + splitCount("val") * rolloutPolicy.evaluationRolloutsPerTask)
+    + splitCount("test") * rolloutPolicy.evaluationRolloutsPerTask * 2;
+  options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.launch-budget-selected", runId, budget: launchBudget.snapshot(), estimatedProviderLaunches });
   if (Object.values(frozenComponents).some((value) => !SHA256.test(value))) throw new Error("Evolution component digest could not be frozen.");
-  const stateRoot = path.resolve(options.stateRoot || process.env.WIKISKILL_HOME || path.join(os.homedir(), ".wikiskill"));
   const sourceRoot = path.join(stateRoot, "workspaces", config.workspaceId, "evolutions", runId, "source");
   await initializeSourceRepo(workspace, sourceRoot, { empty: options.empty === true });
   const baselineSkillDigest = options.empty ? null : await treeDigest(path.join(sourceRoot, ".wikiskill", "skills", targetSkill));
@@ -420,7 +463,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     model,
     ...(runtime ? { runtime } : {}),
     frozenComponents,
-    configDigest: digest(json({ datasetDigest: selection.datasetDigest, targetSkill, baselineSkillDigest, baselineWikiDigest, frozenComponents, rolloutPolicy })),
+    configDigest: digest(json({ datasetDigest: selection.datasetDigest, targetSkill, baselineSkillDigest, baselineWikiDigest, frozenComponents, rolloutPolicy, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches } })),
     rawReferencePrefix: `.wikiskill/raw/evolutions/${runId}`
   };
   const core = require("./index");
@@ -437,7 +480,8 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
       ...(runtimeRunner ? { runner: runtimeRunner } : {}),
       ...(runtimeAdapter ? { adapter: runtimeAdapter } : {}),
       ...(runtimeLearning && !options.maintainer ? { maintainer: runtimeLearning.maintainer } : {}),
-      ...(runtimeLearning && !options.proposer ? { proposer: runtimeLearning.proposer } : {})
+      ...(runtimeLearning && !options.proposer ? { proposer: runtimeLearning.proposer } : {}),
+      providerLaunchBudget: launchBudget
     });
   } catch (error) {
     runError = error;
@@ -447,7 +491,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   if (runError) throw runError;
   const candidate = await stageCandidate(workspace, manifest.runRoot, targetSkill, baselineSkillDigest, completed.state);
   options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.completed", runId, candidateId: candidate?.candidateId ?? null });
-  return { runId, runRoot: manifest.runRoot, datasetId: selection.datasetId, rawRef, wiki, candidate, state: completed.state, runtimeEvidenceDigest: completed.runtimeEvidenceDigest };
+  return { runId, runRoot: manifest.runRoot, datasetId: selection.datasetId, rawRef, wiki, candidate, state: completed.state, launchBudget: launchBudget.snapshot(), runtimeEvidenceDigest: completed.runtimeEvidenceDigest };
 }
 
 async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
@@ -473,7 +517,7 @@ async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
       const runtimeText = await fs.readFile(path.join(status.runRoot, "result", result.runtimeEvidence), "utf8");
       if (digest(runtimeText) !== result.runtimeEvidenceDigest) throw new Error("WikiSkill runtime evidence digest mismatch.");
       runtimeEvidence = JSON.parse(runtimeText);
-      if (runtimeEvidence?.schema !== "wikiskill.runtime-evidence.v1" || runtimeEvidence.runId !== runId) throw new Error("WikiSkill runtime evidence identity is invalid.");
+      if (runtimeEvidence?.schema !== "wikiskill.runtime-evidence.v2" || runtimeEvidence.runId !== runId) throw new Error("WikiSkill runtime evidence identity is invalid.");
     }
   }
   return { runId, manifest: status.manifest, state: status.state, ...(result ? { result } : {}), ...(runtimeEvidence ? { runtimeEvidence } : {}) };

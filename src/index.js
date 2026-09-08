@@ -98,7 +98,8 @@ function validateDataset(dataset) {
     if (task.sandbox !== undefined && !isRecord(task.sandbox)) blockers.push(`${prefix}.sandbox must be Record<string,string> when supplied.`);
     else for (const [key, value] of Object.entries(task.sandbox || {})) {
       try { normalizeRelative(key, `${prefix}.sandbox key`); } catch (error) { blockers.push(error.message); }
-      if (typeof value !== "string") blockers.push(`${prefix}.sandbox[${JSON.stringify(key)}] expected string content; received ${value === null ? "null" : Array.isArray(value) ? "array" : typeof value}.`);
+      const binary = isRecord(value) && value.encoding === "base64" && typeof value.content === "string" && Object.keys(value).length === 2;
+      if (typeof value !== "string" && !binary) blockers.push(`${prefix}.sandbox[${JSON.stringify(key)}] expected string or base64 file content.`);
     }
     if (!("groundTruth" in task) || task.groundTruth === undefined) blockers.push(`${prefix}.groundTruth is required and may contain any serializable domain payload.`);
     if (!isRecord(task.evaluator) || typeof task.evaluator.capabilityRef !== "string" || !task.evaluator.capabilityRef.trim()) blockers.push(`${prefix}.evaluator.capabilityRef must be non-empty text.`);
@@ -322,7 +323,16 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
   const phaseId = (traceDirectory || `iter-${String(iteration).padStart(2, "0")}`).split(/[\\/]/u).join("-");
   const workdir = path.join(runRoot, "environments", `${phaseId}-${attemptId}`);
   await fsp.mkdir(workdir, { recursive: true });
-  for (const [relative, content] of Object.entries(task.sandbox || {})) await writeTextFile(workdir, relative, content);
+  for (const [relative, content] of Object.entries(task.sandbox || {})) {
+    if (typeof content === "string") await writeTextFile(workdir, relative, content);
+    else {
+      const safe = normalizeRelative(relative, "sandbox path");
+      const target = path.resolve(workdir, safe);
+      if (!target.startsWith(`${path.resolve(workdir)}${path.sep}`)) throw new WikiSkillError(`Sandbox path escapes environment: ${relative}`);
+      await fsp.mkdir(path.dirname(target), { recursive: true });
+      await fsp.writeFile(target, Buffer.from(content.content, "base64"));
+    }
+  }
   const visibleTask = {
     id: task.id,
     split: task.split,
@@ -362,6 +372,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       requiredInstructions: typeof executionContext?.requiredInstructions === "string" ? executionContext.requiredInstructions : "",
       skills: renderSkillPrompt(skills)
     });
+    const launchRef = `inference:${phaseId}:${split}:${task.id}:${rollout}`;
     const result = await runner({
       task: visibleTask,
       input,
@@ -374,10 +385,10 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       abortSignal,
       split,
       iteration,
+      launchRef,
       ...(executionContext?.environment ? { environment: executionContext.environment } : {})
     });
     const provider = result.provider ? normalizeProviderSession(result.provider, "Inference") : undefined;
-    const launchRef = `inference:${phaseId}:${split}:${task.id}:${rollout}`;
     if (provider) await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, iteration, rollout, provider });
     const prediction = await (adapter.extractPrediction || defaultAdapter.extractPrediction)({ task: visibleTask, result, split, iteration, adapterConfig });
     const evaluated = await (adapter.score || defaultAdapter.score)({ task, prediction, groundTruth: task.groundTruth, environment, workdir: environmentWorkdir, split, iteration, adapterConfig });
@@ -1013,12 +1024,14 @@ async function runEvolution(runOrId, options = {}) {
     state.testScore = aggregate(test);
     state.testGain = state.testScore - state.baselineTestScore;
     state.status = "completed";
+    if (options.providerLaunchBudget?.snapshot) state.providerLaunchBudget = options.providerLaunchBudget.snapshot();
     await fsp.writeFile(statePath, json(state));
     const resultBundle = await createResultBundle(runRoot, manifest, state);
     return { ...manifest, state, ...resultBundle };
   } catch (error) {
     state.status = abortSignal?.aborted ? "stopped" : "blocked";
     state.blockers = [error instanceof Error ? error.message : String(error)];
+    if (options.providerLaunchBudget?.snapshot) state.providerLaunchBudget = options.providerLaunchBudget.snapshot();
     const failureArtifactPath = error && typeof error === "object" && typeof error.wikiskillFailureArtifactPath === "string"
       ? error.wikiskillFailureArtifactPath
       : undefined;
@@ -1100,7 +1113,20 @@ async function createResultBundle(runRoot, manifest, state) {
     const trace = JSON.parse(await fsp.readFile(tracePath, "utf8"));
     if (trace.provider) inference.push({ launchRef: trace.launchRef, traceId: trace.id, traceRef: path.relative(runRoot, tracePath).split(path.sep).join("/"), provider: trace.provider });
   }
-  const runtimeEvidence = { schema: "wikiskill.runtime-evidence.v1", runId: manifest.runId, inference, learning: state.learningInvocations || [] };
+  const runtimeEvidence = {
+    schema: "wikiskill.runtime-evidence.v2",
+    runId: manifest.runId,
+    inference,
+    learning: state.learningInvocations || [],
+    cohort: manifest.runtime ? {
+      provider: manifest.runtime.provider,
+      modelId: manifest.runtime.modelId,
+      reasoningEffort: manifest.runtime.reasoningEffort,
+      scorerRef: manifest.runtime.scorerRef,
+      toolProfile: manifest.runtime.toolProfile
+    } : null,
+    launchBudget: state.providerLaunchBudget
+  };
   const runtimeEvidenceText = json(runtimeEvidence);
   const runtimeEvidenceDigest = `sha256:${sha256(runtimeEvidenceText)}`;
   await fsp.writeFile(path.join(resultRoot, "runtime-evidence.json"), runtimeEvidenceText);

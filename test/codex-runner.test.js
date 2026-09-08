@@ -7,6 +7,8 @@ const path = require("node:path");
 const test = require("node:test");
 const { createCodexRunner } = require("../src/codex-runner");
 
+
+
 const waitForFile = async (target, timeoutMs = 2_000) => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -42,10 +44,13 @@ process.stdin.on("end", () => {
 
 `);
 
+  const launches = [];
   const runner = createCodexRunner({
     executable: process.execPath,
     executableArgs: [script],
     timeoutMs: 10_000,
+    reasoningEffort: "low",
+    providerLaunchBudget: { consume: (launch) => launches.push(launch) },
     env: { WIKISKILL_TEST_CAPTURE: capturePath }
   });
   const result = await runner({
@@ -54,6 +59,7 @@ process.stdin.on("end", () => {
     workdir,
     tools: [],
     model: { id: "frozen-model" },
+    launchRef: "inference:test",
     predictionSchema: { type: "object", required: ["value"], properties: { value: { type: "string" } } }
   });
 
@@ -61,7 +67,7 @@ process.stdin.on("end", () => {
   assert.deepEqual(capture.args, [
     "exec", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "--json",
     "-C", workdir, "--output-schema", capture.schemaPath, "-o", capture.outputPath,
-    "-m", "frozen-model", "-"
+    "-m", "frozen-model", "-c", "model_reasoning_effort=\"low\"", "-"
   ]);
   assert.match(capture.prompt, /SYSTEM SKILL/u);
   assert.match(capture.prompt, /\{"request":"solve"\}/u);
@@ -71,6 +77,10 @@ process.stdin.on("end", () => {
   assert.deepEqual(result.prediction, { value: "answer" });
   assert.deepEqual(result.provider, { ref: "provider:codex", modelId: "frozen-model", threadId: "thread-123" });
   assert.equal(result.events.some((event) => event.type === "assistant" && event.text === "done"), true);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].launchRef, "inference:test");
+  assert.equal(launches[0].reasoningEffort, "low");
+  assert.deepEqual(launches[0].args.slice(1), capture.args);
   await assert.rejects(fs.access(capture.schemaPath));
   await assert.rejects(fs.access(capture.outputPath));
 });
@@ -88,6 +98,8 @@ const valueAfter = (flag) => args[args.indexOf(flag) + 1];
 let prompt = "";
 process.stdin.on("data", (chunk) => prompt += chunk);
 process.stdin.on("end", () => {
+  const schema = JSON.parse(fs.readFileSync(valueAfter("--output-schema"), "utf8"));
+  if (schema.properties.prediction.type !== "string") process.exit(42);
   fs.writeFileSync(valueAfter("-o"), JSON.stringify({prediction:{summary:"fixed"}}));
   fs.writeFileSync(process.env.WIKISKILL_TEST_CAPTURE, JSON.stringify({args, prompt}));
   for (const record of [

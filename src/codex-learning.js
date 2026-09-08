@@ -108,7 +108,7 @@ const providerFromJsonl = (stdout, role, modelId) => {
   return { ref: "provider:codex", modelId, sessionId: sessions[0] };
 };
 
-const runLearningTurn = async (role, config, prompt, cwd, deps = {}) => {
+const runLearningTurn = async (role, launchRef, config, prompt, cwd, deps = {}) => {
   const executable = typeof config.executable === "string" && config.executable.trim() ? config.executable.trim() : "codex";
   if (typeof config.model !== "string" || !config.model.trim()) throw new Error("WikiSkill Codex learning requires a frozen model id.");
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), `wikiskill-${role}-`));
@@ -125,17 +125,21 @@ const runLearningTurn = async (role, config, prompt, cwd, deps = {}) => {
     "-o",
     outputPath,
     ...(config.useConfiguredModel || typeof config.model !== "string" || !config.model.trim() ? [] : ["-m", config.model.trim()]),
+    ...(config.reasoningEffort ? ["-c", `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`] : []),
     "-"
   ];
   try {
+    const providerEnvironment = createCleanProviderEnvironment(process.env, config.env);
+    const providerPrompt = "生成过程说明及所有新生成的自然语言内容使用简体中文，包括 Wiki 标题、正文、日志、模式总结，以及 Skill 的 description、说明和步骤。代码、命令、路径、URL、稳定 ID、schema 字段和枚举、专有名称、必要原文引用及补丁匹配 target 保持原样，不得翻译机器合同或改变匹配语义。\n\n" + prompt;
+    config.providerLaunchBudget?.consume({ launchRef, role, provider: "codex", modelId: config.model.trim(), reasoningEffort: config.reasoningEffort, executable, args });
     const result = await executeCodex(
       deps.spawn ?? childProcess.spawn,
       executable,
       args,
-      prompt,
+      providerPrompt,
       cwd,
       timeoutFor(config),
-      createCleanProviderEnvironment(process.env, config.env)
+      providerEnvironment
     );
     if (result.code !== 0) throw new Error(`WikiSkill Codex ${role} exited with code ${result.code}: ${(result.stderr || result.stdout).trim()}`);
     if (!fs.existsSync(outputPath)) throw new Error(`WikiSkill Codex ${role} did not produce a final response.`);
@@ -148,7 +152,7 @@ const runLearningTurn = async (role, config, prompt, cwd, deps = {}) => {
 
 const maintainerPrompt = (input) => [
   "你是 WikiSkill Wiki Maintainer。根据本轮采样的 training trajectories 和完整现有 Wiki，增量维护可复用的行为模式；不得写入或修改任何 Skill。",
-  "每条 executionLog 已在注入前按 15000 字符限制，Raw trace 仍由 WikiSkill 保存。不要索取或推测 validation/test 数据。",
+  "每条 executionLog 已在注入前按 15000 字符限制，Raw trace 仍由 WikiSkill 保存。不得读取或推测 validation/test 的任务内容、答案或执行轨迹；可以使用现有 Wiki 的 skill-impact.md 中记录的 validation 汇总分数、候选 diff 与接受/拒绝结果。test 分数不参与候选选择。",
   "只返回一个 JSON object，字段可选：index(string，完整替换 Wiki index)、appendLog(string)、patterns([{name,content}])、patternPatches([{name,edits}])。pattern 名必须是相对 Markdown 路径，edits 使用 append、replace 或 insert_after。",
   "仅当 pattern 已存在且 edit.target 与 Existing Wiki 中的正文逐字匹配时使用 patternPatches；不确定时用 patterns 返回该文件的完整新正文，不得猜测 target。",
   "## Existing Wiki",
@@ -173,7 +177,7 @@ const traceSelectionPrompt = (input) => [
 ].join("\n\n");
 
 const proposerPrompt = (input) => [
-  "你是 WikiSkill Skill Proposer。只依据完整 Wiki、当前 Skills 和本轮 training 结果提出一个原子候选；不得使用 validation/test 的任务数据、轨迹或评分证据。",
+  "你是 WikiSkill Skill Proposer。根据 Wiki、当前 Skills 和本轮 training 结果提出一个原子候选。可以参考 skill-impact.md 中的 validation 汇总分数、候选 diff 与接受/拒绝结果；不得读取或推测 validation/test 的任务内容、答案或执行轨迹，test 分数不参与候选选择。",
   "你先前自主选择的 training traces 已通过受限读取接口提供。只能修改一个 target Skill，context Skill 永远只读。",
   "只返回一个 JSON object：{action:'patch'|'create'|'no_action',skillId?,files?,traceReads:[...] }。patch 时 files 必须包含该单一 Skill 的完整候选文件内容；没有可证明的通用改进时返回 no_action。",
   "## Wiki",
@@ -189,9 +193,10 @@ const proposerPrompt = (input) => [
 ].join("\n\n");
 
 const createMaintainer = (config = {}, deps = {}) => async (input) => {
-  const turn = await runLearningTurn("maintainer", config, maintainerPrompt(input), input.wikiRoot, deps);
+  const launchRef = `learning:${input.attempt}:${input.iteration}:maintainer`;
+  const turn = await runLearningTurn("maintainer", launchRef, config, maintainerPrompt(input), input.wikiRoot, deps);
   const response = turn.response;
-  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: `learning:${input.attempt}:${input.iteration}:maintainer`, role: "maintainer", provider: turn.provider });
+  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef, role: "maintainer", provider: turn.provider });
   let index;
   if (response.index !== undefined) {
     if (typeof response.index !== "string") throw new Error("WikiSkill Codex maintainer index must be text.");
@@ -219,17 +224,19 @@ const createMaintainer = (config = {}, deps = {}) => async (input) => {
 };
 
 const createProposer = (config = {}, deps = {}) => async (input) => {
-  const selectionTurn = await runLearningTurn("proposer-select", config, traceSelectionPrompt(input), input.wikiRoot, deps);
+  const selectionLaunchRef = `learning:${input.attempt}:${input.iteration}:proposer-select`;
+  const selectionTurn = await runLearningTurn("proposer-select", selectionLaunchRef, config, traceSelectionPrompt(input), input.wikiRoot, deps);
   const selection = selectionTurn.response;
-  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: `learning:${input.attempt}:${input.iteration}:proposer-select`, role: "proposer-select", provider: selectionTurn.provider });
+  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: selectionLaunchRef, role: "proposer-select", provider: selectionTurn.provider });
   if (!Array.isArray(selection.traceReads)) throw new Error("WikiSkill Codex proposer selection must return traceReads.");
   const selected = [...new Set(selection.traceReads)];
   const available = new Set(input.availableTraces.map((trace) => trace.id));
   if (selected.length < Math.min(4, input.availableTraces.length) || selected.some((id) => !available.has(id))) throw new Error("WikiSkill Codex proposer selected invalid training traces.");
   const readTraces = selected.map((id) => ({ id, trace: input.readTrace(id) }));
-  const proposalTurn = await runLearningTurn("proposer", config, proposerPrompt({ ...input, readTraces }), input.wikiRoot, deps);
+  const proposalLaunchRef = `learning:${input.attempt}:${input.iteration}:proposer`;
+  const proposalTurn = await runLearningTurn("proposer", proposalLaunchRef, config, proposerPrompt({ ...input, readTraces }), input.wikiRoot, deps);
   const response = proposalTurn.response;
-  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: `learning:${input.attempt}:${input.iteration}:proposer`, role: "proposer", provider: proposalTurn.provider });
+  await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: proposalLaunchRef, role: "proposer", provider: proposalTurn.provider });
   if (typeof response.action !== "string") throw new Error("WikiSkill Codex proposer response is missing action.");
   return {
     ...response,

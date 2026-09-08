@@ -16,14 +16,18 @@ const prompt = args[args.indexOf("-p") + 1];
 const systemPrompt = args[args.indexOf("--append-system-prompt") + 1];
 const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]);
 const model = args[args.indexOf("--model") + 1];
-if (!prompt.includes('"request":"read fact"') || systemPrompt !== "SYSTEM SKILL" || model !== "model-1" || process.cwd() !== ${JSON.stringify(canonicalWorkdir)} || schema.properties.prediction.required[0] !== "fact" || args[args.indexOf("--permission-mode") + 1] !== "dontAsk" || args.includes("--dangerously-skip-permissions")) process.exit(2);
+if (!prompt.includes('"request":"read fact"') || systemPrompt !== "SYSTEM SKILL" || model !== "model-1" || args[args.indexOf("--effort") + 1] !== "low" || process.cwd() !== ${JSON.stringify(canonicalWorkdir)} || schema.properties.prediction.required[0] !== "fact" || args[args.indexOf("--permission-mode") + 1] !== "dontAsk" || args.includes("--dangerously-skip-permissions")) process.exit(2);
 process.stdout.write(JSON.stringify({type:"result",subtype:"success",is_error:false,terminal_reason:"completed",session_id:"session-1",result:"answer",structured_output:{prediction:{fact:"READY"}}}));
 `);
-  const runner = createClaudeRunner({ executable: process.execPath, executableArgs: [script], timeoutMs: 10_000 });
-  const result = await runner({ systemPrompt: "SYSTEM SKILL", input: { request: "read fact" }, workdir, tools: [], model: { id: "model-1" }, predictionSchema: { type: "object", required: ["fact"], properties: { fact: { type: "string" } } } });
+  const launches = [];
+  const runner = createClaudeRunner({ executable: process.execPath, executableArgs: [script], timeoutMs: 10_000, reasoningEffort: "low", providerLaunchBudget: { consume: (launch) => launches.push(launch) } });
+  const result = await runner({ systemPrompt: "SYSTEM SKILL", input: { request: "read fact" }, workdir, tools: [], model: { id: "model-1" }, launchRef: "inference:test", predictionSchema: { type: "object", required: ["fact"], properties: { fact: { type: "string" } } } });
   assert.deepEqual(result.prediction, { fact: "READY" });
   assert.deepEqual(result.events, [{ type: "assistant", text: "answer" }]);
   assert.deepEqual(result.provider, { ref: "provider:claude", modelId: "model-1", sessionId: "session-1" });
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].launchRef, "inference:test");
+  assert.equal(launches[0].reasoningEffort, "low");
 });
 
 test("Claude coding mode uses stream-json and records tool events", async () => {

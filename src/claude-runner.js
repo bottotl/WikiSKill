@@ -5,7 +5,7 @@ const { createCleanProviderEnvironment } = require("./clean-environment");
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CODING_OUTPUT_BYTES = 32 * 1024 * 1024;
-const outputSchema = (predictionSchema = {}) => JSON.stringify({
+const outputSchema = (predictionSchema = { type: "string" }) => JSON.stringify({
   type: "object",
   additionalProperties: false,
   required: ["prediction"],
@@ -40,7 +40,7 @@ const createClaudeRunner = (config = {}) => {
   const timeoutMs = config.timeoutMs ?? 300_000;
   if (!Array.isArray(executableArgs) || executableArgs.some((item) => typeof item !== "string")) throw new Error("Claude runner executableArgs must be a string array.");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000) throw new Error("Claude runner timeoutMs must be an integer of at least 1000 milliseconds.");
-  return ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema }) => new Promise((resolve, reject) => {
+  return ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema, launchRef, providerRole = "inference" }) => new Promise((resolve, reject) => {
     if (!model || typeof model.id !== "string" || !model.id.trim()) return reject(new Error("Claude runner requires a model id."));
     if (!Array.isArray(tools) || tools.some((tool) => tool !== "workspace")) return reject(new Error("Claude runner tools must be empty or workspace."));
     if (abortSignal?.aborted) return reject(new Error("Claude runner aborted before launch."));
@@ -54,10 +54,15 @@ const createClaudeRunner = (config = {}) => {
     const taskTimeoutMs = development && config.timeoutMs === undefined ? 600_000 : timeoutMs;
     const permissionArgs = development ? ["--dangerously-skip-permissions"] : ["--permission-mode", "dontAsk"];
     const toolList = development ? "Bash,Edit,Read,Glob,Grep,Write" : "";
-    const args = [...executableArgs, "-p", prompt, "--output-format", development ? "stream-json" : "json", ...(development ? ["--verbose"] : []), "--json-schema", outputSchema(predictionSchema), "--append-system-prompt", systemPrompt, "--model", model.id.trim(), "--tools", toolList, ...permissionArgs, "--no-session-persistence"];
+    const args = [...executableArgs, "-p", prompt, "--output-format", development ? "stream-json" : "json", ...(development ? ["--verbose"] : []), "--json-schema", outputSchema(predictionSchema), "--append-system-prompt", systemPrompt, "--model", model.id.trim(), ...(config.reasoningEffort ? ["--effort", config.reasoningEffort] : []), "--tools", toolList, ...permissionArgs, "--no-session-persistence"];
     let providerEnvironment;
     try {
       providerEnvironment = createCleanProviderEnvironment(process.env, environment, config.env);
+    } catch (error) {
+      return reject(error);
+    }
+    try {
+      config.providerLaunchBudget?.consume({ launchRef, role: providerRole, provider: "claude", modelId: model.id.trim(), reasoningEffort: config.reasoningEffort, executable, args });
     } catch (error) {
       return reject(error);
     }

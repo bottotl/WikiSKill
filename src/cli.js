@@ -14,7 +14,8 @@ wikiskill context receipts --workspace <workspace> --context <id> --json
 wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empty] --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
-wikiskill evolve --workspace <workspace> --expected-workspace-id <id> --target <skill-id> --dataset <dataset.json> --expected-dataset-digest <sha256> [--expected-target-skill-digest <sha256>] --expected-wiki-digest <sha256> --provider codex|claude --model <id> --scorer <ref> [--empty] [--run-id <id>] --json-events
+wikiskill dataset verify-known-fix --dataset <dataset.json> --scorer <ref> --patch <changes.patch> --json
+wikiskill evolve --workspace <workspace> --expected-workspace-id <id> --target <skill-id> --dataset <dataset.json> --expected-dataset-digest <sha256> [--expected-target-skill-digest <sha256>] --expected-wiki-digest <sha256> --provider codex|claude --model <id> --reasoning-effort <level> --scorer <ref> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--empty] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
 wikiskill candidate diff --workspace <workspace> --candidate <id> --json
@@ -27,7 +28,7 @@ const SUBCOMMANDS = Object.freeze({
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   evolution: new Set(["baseline"]),
   bootstrap: new Set(["install", "uninstall"]),
-  dataset: new Set(["validate"])
+  dataset: new Set(["validate", "verify-known-fix"]),
 });
 
 const VALUE_FLAGS = Object.freeze({
@@ -45,7 +46,12 @@ const VALUE_FLAGS = Object.freeze({
   "--candidate": "candidate",
   "--provider": "provider",
   "--model": "modelId",
+  "--reasoning-effort": "reasoningEffort",
   "--scorer": "scorerRef",
+  "--patch": "patchPath",
+  "--tool-profile": "toolProfile",
+  "--iterations": "iterationLimit",
+  "--max-provider-launches": "maxProviderLaunches",
   "--receipt": "receipt",
   "--state-root": "stateRoot",
   "--context": "contextId",
@@ -126,8 +132,11 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
     else if (options.command === "evolve") {
       if (!options.jsonEvents) throw new Error("evolve requires --json-events.");
       if (options.datasetPath) {
-        const runtime = [options.provider, options.modelId, options.scorerRef];
-        if (runtime.some((value) => value === undefined)) throw new Error("evolve --dataset requires --provider, --model, and --scorer.");
+        const runtime = [options.provider, options.modelId, options.reasoningEffort, options.scorerRef, options.toolProfile, options.iterationLimit, options.maxProviderLaunches];
+        if (runtime.some((value) => value === undefined)) throw new Error("evolve --dataset requires --provider, --model, --reasoning-effort, --scorer, --tool-profile, --iterations, and --max-provider-launches.");
+        if (options.toolProfile !== "none" && options.toolProfile !== "workspace") throw new Error("evolve --tool-profile must be none or workspace.");
+        if (!/^\d+$/u.test(options.iterationLimit) || !Number.isSafeInteger(Number(options.iterationLimit)) || Number(options.iterationLimit) < 1) throw new Error("evolve --iterations must be a positive safe integer.");
+        if (!/^\d+$/u.test(options.maxProviderLaunches) || Number(options.maxProviderLaunches) < 1 || Number(options.maxProviderLaunches) > 10_000) throw new Error("evolve --max-provider-launches must be between 1 and 10000.");
         if (!options.expectedWorkspaceId) throw new Error("evolve --dataset requires --expected-workspace-id from evolution baseline.");
         if (!options.expectedDatasetDigest) throw new Error("evolve --dataset requires --expected-dataset-digest from dataset validate.");
         if (!options.empty && !options.expectedTargetSkillDigest) throw new Error("evolve --dataset requires --expected-target-skill-digest from evolution baseline.");
@@ -152,7 +161,12 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");
       data = await core.updateBootstrap(options.workspace, options.subcommand, { command: options.bootstrapCommand, dryRun: options.dryRun });
     } else if (options.command === "dataset") {
-      if (options.subcommand !== "validate") throw new Error("Only `dataset validate` is supported.");
+      if (options.subcommand === "verify-known-fix") {
+        if (!options.datasetPath || !options.scorerRef || !options.patchPath) throw new Error("dataset verify-known-fix requires --dataset, --scorer, and --patch.");
+        data = await require("./dataset-known-fix").verifyKnownFixDataset({ datasetPath: options.datasetPath, scorerRef: options.scorerRef, patchPath: options.patchPath });
+        if (data.verdict !== "passed") return output(core.ENVELOPE(data, [], data.failures, []), 1, io);
+      } else if (options.subcommand !== "validate") throw new Error("Only `dataset validate` and `dataset verify-known-fix` are supported.");
+      else {
       if (!options.datasetPath || !options.scorerRef) throw new Error("dataset validate requires --dataset and --scorer.");
       const dataset = core.validateDataset(JSON.parse(await fs.readFile(path.resolve(options.datasetPath), "utf8")));
       if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== options.scorerRef)) throw new Error("Every dataset task evaluator must match --scorer.");
@@ -163,6 +177,7 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
         scorerRef: options.scorerRef,
         splitCounts: Object.fromEntries(["train", "val", "test"].map((split) => [split, dataset.tasks.filter((task) => task.split === split).length]))
       };
+      }
     } else if (options.command === "candidate") {
       if (options.subcommand === "diff") data = await core.diffCandidate(options.workspace, options.candidate);
       else if (options.subcommand === "apply") data = await core.applyCandidate(options.workspace, options.candidate, options);

@@ -152,7 +152,7 @@ const createCodexRunner = (config = {}) => {
   if (!Array.isArray(executableArgs) || executableArgs.some((value) => typeof value !== "string")) throw new Error("Codex runner executableArgs must be a string array.");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000) throw new Error("Codex runner timeoutMs must be an integer of at least 1000 milliseconds.");
 
-  return async ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema }) => {
+  return async ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema, launchRef }) => {
     if (!model || typeof model.id !== "string" || !model.id.trim()) throw new Error("Codex runner requires a model id.");
     if (!Array.isArray(tools) || tools.some((tool) => tool !== "workspace")) throw new Error("Codex runner tools must be empty or workspace.");
     const taskTimeoutMs = tools.includes("workspace") && config.timeoutMs === undefined ? 600_000 : timeoutMs;
@@ -160,12 +160,14 @@ const createCodexRunner = (config = {}) => {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-codex-runner-"));
     const schemaPath = path.join(temporaryRoot, "prediction.schema.json");
     const outputPath = path.join(temporaryRoot, "prediction.json");
-    await fs.writeFile(schemaPath, JSON.stringify({ ...PREDICTION_SCHEMA, properties: { prediction: predictionSchema || {} } }));
+    await fs.writeFile(schemaPath, JSON.stringify({ ...PREDICTION_SCHEMA, properties: { prediction: predictionSchema || { type: "string" } } }));
     const args = [
       ...executableArgs, "exec", "--ephemeral", "--skip-git-repo-check",
       ...(tools.includes("workspace") ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--sandbox", "read-only"]), "--json",
       "-C", workdir, "--output-schema", schemaPath, "-o", outputPath,
-      "-m", model.id.trim(), "-"
+      "-m", model.id.trim(),
+      ...(config.reasoningEffort ? ["-c", `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`] : []),
+      "-"
     ];
     const prompt = [
       String(systemPrompt || ""),
@@ -176,11 +178,21 @@ const createCodexRunner = (config = {}) => {
 
     try {
       if (abortSignal?.aborted) throw new Error("Codex runner aborted before launch.");
+      const providerEnvironment = createCleanProviderEnvironment(process.env, environment, config.env);
+      config.providerLaunchBudget?.consume({
+        launchRef,
+        role: "inference",
+        provider: "codex",
+        modelId: model.id.trim(),
+        reasoningEffort: config.reasoningEffort,
+        executable,
+        args,
+      });
       const result = await executeCodex({
         executable,
         args,
         workdir,
-        env: createCleanProviderEnvironment(process.env, environment, config.env),
+        env: providerEnvironment,
         prompt,
         timeoutMs: taskTimeoutMs,
         abortSignal

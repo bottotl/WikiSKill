@@ -175,9 +175,15 @@ WikiSkill 只把 `input` 和 `outputSchema` 传给 Inference Agent；ground trut
 ```sh
 wikiskill dataset validate --dataset dataset.json --scorer builtin:exact-output-v1 --json
 wikiskill evolution baseline --workspace . --target <skill-id> --json
-wikiskill evolve --workspace . --expected-workspace-id <workspace-id> --target <skill-id> --dataset dataset.json --expected-dataset-digest <validated-dataset-digest> --expected-target-skill-digest <baseline-skill-digest> --expected-wiki-digest <baseline-wiki-digest> --provider claude --model <model-id> --scorer builtin:exact-output-v1 --json-events
+wikiskill evolve --workspace . --expected-workspace-id <workspace-id> --target <skill-id> --dataset dataset.json --expected-dataset-digest <validated-dataset-digest> --expected-target-skill-digest <baseline-skill-digest> --expected-wiki-digest <baseline-wiki-digest> --provider claude --model <model-id> --reasoning-effort low --scorer builtin:exact-output-v1 --tool-profile none --iterations 1 --max-provider-launches 24 --json-events
 wikiskill status --workspace . --run <run-id> --json
 ```
+
+`--iterations`、`--reasoning-effort`、`--tool-profile` 和 `--max-provider-launches` 都是冻结运行配置。K 接受正安全整数，不设 3 次的通用上限。`workspace` 允许 Inference Agent 修改独立任务工作区，`none` 不提供工具；内置 command-exit scorer 使用 `workspace`，exact-output scorer 使用 `none`。最坏情况 Provider 启动次数仅作预估，预算无需覆盖全部预估迭代；每次启动前记录并扣减实际启动次数，resume/fork 参数、配置漂移或预算耗尽会阻止该次启动。Provider 启动次数不等于模型 API 调用次数或费用。
+
+当前采样次数是实验设置：command-exit 在训练任务不足 4 个时重复执行，以提供至少 4 条真实训练轨迹；内置其他运行路径采用每任务训练 2 次、评估 3 次。论文附录要求 Proposer 读取至少 4 条轨迹，并未规定这些重复次数或固定 4/2/2 划分。baseline validation 满分时按算法提前结束，不为凑轨迹启动训练。
+
+`wikiskill dataset verify-known-fix` 是已有修复补丁的缺陷诊断命令，用于检查该补丁在指定任务上的 RED→GREEN 表现；它不是通用演化的启动条件。合法任务集与 scorer 可以在没有已知补丁时用于演化。
 
 使用 `--empty` 可以从空的 S0/W0 创建第一个 Skill。
 上层产品必须先执行 `dataset validate` 和 `evolution baseline`，再把返回的 workspace、

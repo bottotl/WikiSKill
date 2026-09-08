@@ -47,14 +47,18 @@ const task = (id, split, groundTruth = { value: "ok" }) => ({
   evaluator: { capabilityRef: "adapter:test" }
 });
 
-test("rejects every non-text sandbox value before any workspace write", () => {
-  for (const value of [{ bad: true }, ["bad"], 3, false, null]) {
+test("accepts explicit base64 sandbox files and rejects malformed non-text values", () => {
+  assert.doesNotThrow(() => validateDataset({ schema: "wikiskill.dataset.v1", tasks: [
+    { ...task("train", "train"), sandbox: { "input.bin": { encoding: "base64", content: "AAEC" } } },
+    task("val", "val"), task("test", "test")
+  ] }));
+  for (const value of [{ bad: true }, { encoding: "base64" }, { encoding: "hex", content: "00" }, ["bad"], 3, false, null]) {
     const dataset = { schema: "wikiskill.dataset.v1", tasks: [
       { ...task("train", "train"), sandbox: { "input.txt": value } },
       task("val", "val"),
       task("test", "test")
     ] };
-    assert.throws(() => validateDataset(dataset), (error) => error.blockers.some((item) => item.includes("expected string content")));
+    assert.throws(() => validateDataset(dataset), (error) => error.blockers.some((item) => item.includes("expected string or base64")));
   }
 });
 

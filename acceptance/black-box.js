@@ -69,11 +69,16 @@ const main = async () => {
       "--expected-wiki-digest", baselineState.wikiDigest,
       "--provider", "claude",
       "--model", "fixture-model",
+      "--reasoning-effort", "low",
       "--scorer", "scorer:fixture",
+      "--tool-profile", "none",
+      "--iterations", "2",
+      "--max-provider-launches", "24",
       "--run-id", "installed-acceptance",
       "--json-events"
     ], env);
     assert.equal(events[0].selection, "dataset-file");
+    assert.equal(events.find((event) => event.type === "evolution.launch-budget-selected").estimatedProviderLaunches, 24);
     const result = events.at(-1).data;
     assert.equal(result.state.baselineValidationScore, 0);
     assert.equal(result.state.bestValidationScore, 1);

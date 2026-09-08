@@ -15,6 +15,7 @@ const prompt = args[args.indexOf("-p") + 1];
 const systemPrompt = args[args.indexOf("--append-system-prompt") + 1];
 const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]).properties.prediction;
 const model = args[args.indexOf("--model") + 1];
+if (!systemPrompt.includes("自然语言内容使用简体中文") || !systemPrompt.includes("补丁匹配 target 保持原样")) process.exit(6);
 if (model !== "frozen-model") process.exit(2);
 const selection = prompt.includes("select-training-trajectories");
 if ((selection && !systemPrompt.includes("one field: {traceReads")) || (!selection && !systemPrompt.includes("action patch, create, or no_action"))) process.exit(4);
