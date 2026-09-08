@@ -1,0 +1,125 @@
+src/claude-runner.js
+  s_967db03fced08f::t_813d988ed5b3bd 43
+  s_967db03fced08f::t_b21a20c8b7464f 57,64
+  s_967db03fced08f::t_cc8d7f64766ee8 65
+  s_967db03fced08f::t_0291f16bdd5130 8
+  s_967db03fced08f::t_62be8644f17ec7 66-68
+src/index.js
+  s_967db03fced08f::t_3adee0b0e97792 329-331
+  s_967db03fced08f::t_25d737e7a0f918 1121-1127
+  s_967db03fced08f::t_eed56f366df4e4 101-102,326-328,332-335
+  s_967db03fced08f::t_97c28ea947fc73 375,388
+  s_967db03fced08f::t_e2f4c601784ec0 1027,1034,1116-1120,1128-1129
+test/codex-runner.test.js
+  s_967db03fced08f::t_2a2803c3d9343a 53
+  s_967db03fced08f::t_61672809604da3 10
+  s_967db03fced08f::t_9c7697b6f48ea3 83
+  s_967db03fced08f::t_acaa673a0d4d53 47,62,80-82
+  s_967db03fced08f::t_8099846c89ea98 11
+  s_967db03fced08f::t_75ca254851e257 101-102
+  s_967db03fced08f::t_43d439f5db5484 52,70
+src/codex-learning.js
+  s_967db03fced08f::t_3dbbb263c3468e 133,139,142
+  s_967db03fced08f::t_6bbee180ddbd05 155,180
+  s_967db03fced08f::t_b21a20c8b7464f 111,128,196-197,199,227-228,230,236-237,239
+  s_967db03fced08f::t_3a94da4b208bda 132,134
+src/task-dependencies.js
+  s_967db03fced08f::t_e8a5c43bc499ff 1-34
+src/cli.js
+  s_967db03fced08f::t_6b8b6e91a54487 17,51,164-169,180
+  s_967db03fced08f::t_6f4554eb65e195 31
+  s_967db03fced08f::t_25d737e7a0f918 18,52,135-137
+  s_967db03fced08f::t_e8551e4ba53078 49,54,139
+  s_967db03fced08f::t_9a2208b52be6d3 138
+  s_967db03fced08f::t_f7ade58e10b12e 53
+test/task-dependencies.test.js
+  s_967db03fced08f::t_714b53527a73ac 1-21
+src/claude-learning.js
+  s_967db03fced08f::t_6bbee180ddbd05 39,49
+  s_967db03fced08f::t_f4bc261fdf4af4 56-57
+  s_967db03fced08f::t_b21a20c8b7464f 54,64-65,71,97-98,108,115-116,126
+src/codex-runner.js
+  s_967db03fced08f::t_3dbbb263c3468e 195
+  s_967db03fced08f::t_0291f16bdd5130 163
+  s_967db03fced08f::t_a963e8fcc66d62 181,188-189
+  s_967db03fced08f::t_b21a20c8b7464f 155,168-170,182-187,190
+test/claude-learning.test.js
+  s_967db03fced08f::t_28a908931694c8 18
+test/provider-launch-budget.test.js
+  s_967db03fced08f::t_a63cf3b429343c 1-7
+  s_967db03fced08f::t_14baf7803903d4 8,20
+  s_967db03fced08f::t_f807cee467bba8 9-19
+  s_967db03fced08f::t_237b91d122c41c 21
+src/dataset-known-fix.js
+  s_967db03fced08f::t_5c09be395665c5 7,83
+  s_967db03fced08f::t_6b8b6e91a54487 1-6,8-10,12-35,37-39,41-60,66-68,70-71,73-74,76-82,84-91
+  s_967db03fced08f::t_5d6624dee551a4 75
+  s_967db03fced08f::t_e8a5c43bc499ff 11,36,40
+  s_967db03fced08f::t_3d28b892849236 61-65,69,72
+test/evolution.test.js
+  s_967db03fced08f::t_252fbd093249d7 155
+  s_967db03fced08f::t_129d476beed720 619
+  s_967db03fced08f::t_6fe3f104684eeb 310,338,368,398,504
+  s_967db03fced08f::t_80b5bce5b7fef2 246,263,576-578,585-618
+  s_967db03fced08f::t_ec4a8d7db09af4 260,264,307,311,335,339,365,369,395,399,501,505
+  s_967db03fced08f::t_1c2c5dbb3ba982 630-631,654
+  s_967db03fced08f::t_d0996c581e0026 262,309,337,367,397,503
+  s_967db03fced08f::t_7387d997b3ecf8 123
+  s_967db03fced08f::t_e0e907392bd410 122
+  s_967db03fced08f::t_d590778c6cc3a8 552-568
+  s_967db03fced08f::t_d9eee710ee1043 579-584
+src/provider-launch-budget.js
+  s_967db03fced08f::t_73ccc96d7941c7 6-9,11-13,16-19,21,25-27,31-45
+  s_967db03fced08f::t_40991f470fed83 23
+  s_967db03fced08f::t_cfd10fecff8b63 22
+  s_967db03fced08f::t_bce3e9e75cadff 1-5,14-15,20,24,28-30,46-52
+  s_967db03fced08f::t_1a9443fd140c88 10
+test/codex-learning.test.js
+  s_967db03fced08f::t_722fa8c0dceae9 11-12
+  s_967db03fced08f::t_3b1f2f941b7b9d 13
+  s_967db03fced08f::t_43d439f5db5484 65
+  s_967db03fced08f::t_28a908931694c8 68-69
+  s_967db03fced08f::t_a4c863b100d167 76-77,86
+  s_967db03fced08f::t_acaa673a0d4d53 57-58,87
+test/core.test.js
+  s_967db03fced08f::t_1c2c5dbb3ba982 50-55,61
+test/dataset-known-fix.test.js
+  s_967db03fced08f::t_3d28b892849236 1-36
+README.md
+  s_967db03fced08f::t_761e5595955666 178
+  s_967db03fced08f::t_9a2208b52be6d3 182-184
+  s_967db03fced08f::t_d22b93188f62e7 186-187
+  s_967db03fced08f::t_99c5b1e1331e42 185
+test/claude-runner.test.js
+  s_967db03fced08f::t_acaa673a0d4d53 22-24,28-30
+  s_967db03fced08f::t_43d439f5db5484 19
+src/evolution.js
+  s_967db03fced08f::t_726e6c70f71e94 331,338,340-343,411
+  s_967db03fced08f::t_b0dc9ee7740a06 335,361,364-367,412-413,483-484
+  s_967db03fced08f::t_a6d58a8bb2d510 418
+  s_967db03fced08f::t_2589edd05c1e5c 466
+  s_967db03fced08f::t_f5b6a86616d42c 520
+  s_967db03fced08f::t_e8a5c43bc499ff 10,250-251,255,350
+  s_967db03fced08f::t_9a2208b52be6d3 205,407-408,416
+  s_967db03fced08f::t_c77692101b8fc1 9,271-283,339,344-345,363,368,378,397,399,422-426,494
+  s_967db03fced08f::t_25d737e7a0f918 232-234,245,284-285,347,351,398
+acceptance/black-box.js
+  s_967db03fced08f::t_f335913fc289d0 72,75-76,81
+  s_967db03fced08f::t_761e5595955666 74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "d3fec1ced11bd22aeef249092ccbe6c8e12b38ef",
+  "prompts": {},
+  "sessions": {
+    "s_967db03fced08f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a07a6f-92dd-7603-9ab7-3bc04e813070",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
