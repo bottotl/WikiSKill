@@ -231,7 +231,7 @@ const writeModules = async (workspace) => {
     const traceReads = availableTraces.slice(0, 4).map(({id}) => id);
     traceReads.forEach(readTrace);
     const skillId = skills.target["target-skill"] ? "target-skill" : allowedNewSkillIds[0];
-    return {action: skills.target["target-skill"] ? "patch" : "create", skillId, traceReads, files: {"SKILL.md": "---\\nname: target-skill\\ndescription: Handle target tasks.\\n---\\n\\nUse the improved procedure.\\n"}};
+    return {action: skills.target["target-skill"] ? "patch" : "create", skillId, traceReads, files: {"SKILL.md": "---\\nname: target-skill\\ndescription: Handle target tasks.\\n---\\n\\nUse the improved procedure.\\n", "PURPOSE.md": "# Purpose\\n\\n- Supporting pattern: cli.md\\n"}};
   };\n`);
   return {
     schema: "wikiskill.evolution-config.v1",
@@ -627,10 +627,11 @@ test("public empty mode creates, applies, and rolls back the first Skill", async
     return JSON.parse(lines.join(""));
   };
   const diff = await invoke(["candidate", "diff", "--workspace", workspace, "--candidate", candidate.candidateId, "--json"]);
-  assert.deepEqual(diff.data.changedPaths, [".wikiskill/skills/target-skill/SKILL.md"]);
+  assert.deepEqual(diff.data.changedPaths, [".wikiskill/skills/target-skill/PURPOSE.md", ".wikiskill/skills/target-skill/SKILL.md"]);
   const applied = await invoke(["candidate", "apply", "--workspace", workspace, "--candidate", candidate.candidateId, "--json"]);
   assert.equal(applied.data.receipt.created, true);
   assert.match(await fs.readFile(path.join(workspace, ".wikiskill/skills/target-skill/SKILL.md"), "utf8"), /improved procedure/u);
+  assert.match(await fs.readFile(path.join(workspace, ".wikiskill/skills/target-skill/PURPOSE.md"), "utf8"), /Supporting pattern/u);
   const rolledBack = await invoke(["rollback", "--workspace", workspace, "--receipt", applied.data.receipt.receiptId, "--json"]);
   assert.equal(rolledBack.data.removedCreatedSkill, true);
   assert.equal(await fs.access(path.join(workspace, ".wikiskill/skills/target-skill")).then(() => true, () => false), false);

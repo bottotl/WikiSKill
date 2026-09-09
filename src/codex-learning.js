@@ -179,7 +179,7 @@ const traceSelectionPrompt = (input) => [
 const proposerPrompt = (input) => [
   "你是 WikiSkill Skill Proposer。根据 Wiki、当前 Skills 和本轮 training 结果提出一个原子候选。可以参考 skill-impact.md 中的 validation 汇总分数、候选 diff 与接受/拒绝结果；不得读取或推测 validation/test 的任务内容、答案或执行轨迹，test 分数不参与候选选择。",
   "你先前自主选择的 training traces 已通过受限读取接口提供。只能修改一个 target Skill，context Skill 永远只读。",
-  "只返回一个 JSON object：{action:'patch'|'create'|'no_action',skillId?,files?,traceReads:[...] }。patch 时 files 必须包含该单一 Skill 的完整候选文件内容；没有可证明的通用改进时返回 no_action。",
+  "只返回一个 JSON object：{action:'patch'|'create'|'no_action',skillId?,files?,traceReads:[...] }。create 时 files 必须包含 SKILL.md 和 PURPOSE.md；PURPOSE.md 应引用支持本次创建的 Wiki pattern。patch 时 files 包含该单一 Skill 的完整候选文件内容，并在依据发生变化时同步 PURPOSE.md；没有可证明的通用改进时返回 no_action。",
   "## Wiki",
   JSON.stringify(input.wiki),
   "## Current Skills",

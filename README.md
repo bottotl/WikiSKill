@@ -40,9 +40,17 @@ WikiSkill 维护三层状态：
 显式提供这些输入：具体包括任务输入与环境、正确性判定所需的 ground truth 或
 verifier、彼此独立的 train/val/test 划分，以及能反映目标质量的 scorer。
 
-上层产品可以从日常任务轨迹和验证证据自动物化这些输入，再调用
-`wikiskill dataset validate` 和 `wikiskill evolve`。WikiSkill 的算法层不会自行
+上层产品可以从多次独立任务轨迹和验证证据物化这些输入，再调用
+`wikiskill experiment prepare` 和 `wikiskill evolve --experiment`。WikiSkill 的算法层不会自行
 猜测、复制或补齐缺失的数据集和 scorer。
+
+### 证据与演化分层
+
+单次需求、事故或 commit 只适合积累 episode evidence：保留任务与环境、执行命令与结果、失败恢复过程，以及可能复用的程序假设。确定性缺陷直接进入普通代码修复。不要从一个 episode 改写出 train/validation/test 并据此声明 Skill 得到验证。
+
+`dataset recommend-commit` 和 `dataset compile-commit` 只用于发现、整理历史工程材料。编译出的同源行为案例可用于检查 harness 和 scorer，不自动成为具有独立性的正式演化数据集。
+
+只有积累了多个独立 episode，且能形成相互独立的 train/validation/test 与可观察 scorer 时，才进入 Skill evolution。论文复现还要求从空的 `(S0, W0)` 开始。`skills/wikiskill-evolution/SKILL.md` 提供对应的模式选择和结果判读表。
 
 在这些前提就绪后，论文定义的单次演化循环不包含人工决策角色：Inference Agent
 执行任务，Wiki Maintainer 更新 Wiki，Skill Proposer 提出修改，validation gate 根据
@@ -250,13 +258,20 @@ uninstall
 evolve
 status
 configure
+evolution baseline
 context prepare
 context skill-get
 context receipt
 context receipts
+experiment prepare
+experiment audit
+run audit
 bootstrap install
 bootstrap uninstall
 dataset validate
+dataset recommend-commit
+dataset compile-commit
+dataset verify-known-fix
 candidate diff
 candidate apply
 rollback

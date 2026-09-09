@@ -20,4 +20,5 @@ npm run acceptance
 ```
 
 命令会创建隔离的临时 workspace，并在所有断言通过后清理。`adapters/`
-中的角色是 deterministic fixture，不是真实 Provider。
+中的角色是 deterministic fixture，不是真实 Provider。验收通过
+`experiment prepare` 生成单一 artifact，再用 `evolve --experiment` 启动循环。

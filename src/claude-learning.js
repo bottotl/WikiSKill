@@ -47,7 +47,7 @@ const systemPromptFor = (role) => {
   ].join("\n");
   return [
     "你是 WikiSkill Skill Proposer。仅使用提供的 Wiki、当前 Skills、训练结果与选定的训练轨迹。可以参考 skill-impact.md 中的 validation 汇总分数、候选 diff 与接受/拒绝结果；不得读取或推测 validation/test 的任务内容、答案或执行轨迹，test 分数不参与候选选择。",
-    "Return exactly one prediction object with action patch, create, or no_action. For patch/create include one skillId and files object. Modify at most one target Skill."
+    "Return exactly one prediction object with action patch, create, or no_action. For patch/create include one skillId and files object. A created Skill must include SKILL.md and PURPOSE.md; PURPOSE.md cites the supporting Wiki patterns. Update PURPOSE.md on a patch when its motivating patterns change. Modify at most one target Skill."
   ].join("\n");
 };
 

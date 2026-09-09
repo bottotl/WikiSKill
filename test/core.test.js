@@ -541,9 +541,10 @@ test("creates a new Skill only inside the declared newSkillRoot", async () => {
   const manifest = await createRun({ repo, skillRoots: [".agents/skills"], targetSkills: ["one"], newSkillRoot: ".agents/skills", dataset, stateRoot, runId: "run-create" });
   const runner = async ({ skills }) => ({ prediction: { value: skills.target["new-skill"] ? "new" : "old" }, events: [] });
   const adapter = { extractPrediction: ({ result }) => result.prediction, score: ({ prediction, groundTruth }) => ({ score: prediction.value === groundTruth.value ? 1 : 0 }) };
-  await runEvolution(manifest.runRoot, { runner, adapter, proposer: async (input) => { const traceReads = readFourTraces(input); return { action: "create", skillId: "new-skill", files: { "SKILL.md": "# New Skill\n" }, traceReads }; } });
+  await runEvolution(manifest.runRoot, { runner, adapter, proposer: async (input) => { const traceReads = readFourTraces(input); return { action: "create", skillId: "new-skill", files: { "SKILL.md": "# New Skill\n", "PURPOSE.md": "# Purpose\n\n- Supporting pattern: observed.md\n" }, traceReads }; } });
   const dryRun = await applyRun(manifest.runRoot, { repo, dryRun: true });
   assert.ok(dryRun.changedPaths.includes(".agents/skills/new-skill/SKILL.md"));
+  assert.ok(dryRun.changedPaths.includes(".agents/skills/new-skill/PURPOSE.md"));
   assert.equal(await fs.access(path.join(repo, ".agents/skills/new-skill")).then(() => true).catch(() => false), false);
 });
 

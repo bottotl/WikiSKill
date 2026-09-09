@@ -18,7 +18,7 @@ const model = args[args.indexOf("--model") + 1];
 if (!systemPrompt.includes("自然语言内容使用简体中文") || !systemPrompt.includes("补丁匹配 target 保持原样")) process.exit(6);
 if (model !== "frozen-model") process.exit(2);
 const selection = prompt.includes("select-training-trajectories");
-if ((selection && !systemPrompt.includes("one field: {traceReads")) || (!selection && !systemPrompt.includes("action patch, create, or no_action"))) process.exit(4);
+if ((selection && !systemPrompt.includes("one field: {traceReads")) || (!selection && (!systemPrompt.includes("action patch, create, or no_action") || !systemPrompt.includes("PURPOSE.md")))) process.exit(4);
 if ((selection && schema.required[0] !== "traceReads") || (!selection && schema.required[0] !== "action")) process.exit(5);
 if ((selection && prompt.includes("selected-trace-body")) || (!selection && !prompt.includes("selected-trace-body"))) process.exit(3);
 const prediction = selection ? {traceReads:["trace-4","trace-2","trace-1","trace-3"]} : {action:"no_action"};

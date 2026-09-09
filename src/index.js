@@ -657,7 +657,7 @@ const proposalToFiles = (proposal, policy) => {
     if (!policy.newSkillRoot) throw new WikiSkillError("Creating a Skill requires an explicit newSkillRoot.");
     if (policy.allowedNewSkillIds.size && !policy.allowedNewSkillIds.has(proposal.skillId)) throw new WikiSkillError(`Proposal may only create the requested Skill: ${proposal.skillId}.`);
     if (policy.existingSkillIds.has(proposal.skillId)) throw new WikiSkillError(`New Skill already exists in this evolution: ${proposal.skillId}.`);
-    if (typeof proposal.files["SKILL.md"] !== "string") throw new WikiSkillError("A created Skill must include SKILL.md.");
+    if (typeof proposal.files["SKILL.md"] !== "string" || typeof proposal.files["PURPOSE.md"] !== "string") throw new WikiSkillError("A created Skill must include SKILL.md and PURPOSE.md.");
   }
   return Object.entries(proposal.files).map(([relative, content]) => {
     normalizeRelative(relative, "proposal file");

@@ -106,6 +106,7 @@ test("Codex proposer reads four constrained training traces before returning one
         assert.match(prompt, /Restricted Trace Reads/u);
         assert.match(prompt, /body-4/u);
         assert.match(prompt, /validation\/test/u);
+        assert.match(prompt, /PURPOSE[.]md/u);
       }
     })
   });

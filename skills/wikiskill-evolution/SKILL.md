@@ -7,15 +7,21 @@ description: Design, audit, run, interpret, and publish WikiSkill evolution expe
 
 Use WikiSkill to improve reusable Agent procedure from task experience while keeping product engineering, task execution, and Skill proposal as separate responsibilities.
 
-## Classify the Work First
+## Choose the Mode
 
-- Fix deterministic defects in parsers, runners, CLIs, schemas, or infrastructure through the normal code-and-test workflow. Preserve their executions as evidence, but do not ask an Inference Agent to repair the evolution system it is being evaluated with.
-- Use Skill evolution for reusable decisions and procedures that can improve performance across a task distribution.
-- If both are present, stabilize the deterministic execution surface first, then freeze it for the experiment.
+| Available evidence | Mode | Outcome |
+| --- | --- | --- |
+| One task, incident, or commit | Evidence collection | Episode record and reusable hypothesis; no evolved candidate claim |
+| Several independent episodes | Skill evolution | Validation-gated candidate |
+| Independent benchmark with empty initial state | Paper reproduction | Comparable experiment result |
+
+For evidence collection, complete the real task with the normal engineering workflow. Preserve the original request and environment, commands and outcomes, failure and recovery evidence, and the possible reusable procedure. Classify deterministic parser, runner, CLI, schema, or infrastructure defects as product fixes. Do not manufacture train/validation/test variants from one episode or start `experiment prepare` until independent tasks exist.
 
 ## Required Flow
 
-1. Read [evolution-guidelines.md](references/evolution-guidelines.md). Define real domain tasks for the Inference Agent and align task text, fixtures, scorer expectations, and write scope. The task must ask the Agent to do the work, not to optimize the Skill.
+Use this flow only for Skill evolution or paper reproduction:
+
+1. Read [evolution-guidelines.md](references/evolution-guidelines.md). Define real domain tasks for the Inference Agent and align task text, fixtures, scorer expectations, and write scope. Use the dataset template there. The task must ask the Agent to do the work, not to optimize the Skill.
 2. Prepare one experiment artifact before any Provider rollout. This command validates the dataset through the selected scorer, freezes the complete active Skill context and evolution baseline, and runs the experiment audit:
 
    ```sh
@@ -37,7 +43,7 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
    wikiskill run audit --run-root <run-root> --workspace <workspace> --json
    ```
 
-6. Interpret and publish the result using [evolution-guidelines.md](references/evolution-guidelines.md). Strict validation gain is required. `no_action`, rejection, and Wiki-only growth are valid outcomes.
+6. Interpret the result with the decision table in [evolution-guidelines.md](references/evolution-guidelines.md), then review and publish an accepted candidate when appropriate.
 
 ## Boundaries
 
@@ -52,4 +58,4 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
 
 ## Completion
 
-Report the frozen active Skill bundle, inputs, split-independence evidence, Provider launches, baseline and candidate validation scores, final test score, Wiki changes, candidate state, run-audit result, and publication receipt when one exists. Never describe `completed` alone as Skill improvement.
+For evidence collection, report the episode facts, product defects, reusable hypothesis, and what independent evidence is still needed. For evolution, report the frozen active Skill bundle, inputs, split-independence evidence, Provider launches, validation and test scores, Wiki changes, candidate state, run-audit result, and publication receipt when one exists.

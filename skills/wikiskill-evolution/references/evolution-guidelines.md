@@ -29,6 +29,24 @@ For each task, align these elements as one contract:
 
 Each task must have an observable result that a domain scorer can judge without reading hidden reasoning. Do not ask for a broad workflow change while permitting only a narrow implementation file, or grant broad writes for a narrow output.
 
+Start from this minimal shape and replace every placeholder with a real independent task:
+
+```json
+{
+  "schema": "wikiskill.dataset.v1",
+  "domain": "<domain>",
+  "tasks": [
+    {
+      "id": "<task-id>",
+      "split": "train",
+      "input": { "instruction": "<real task>" },
+      "groundTruth": { "<scorer-private-contract>": "<value>" },
+      "evaluator": { "capabilityRef": "<scorer-ref>" }
+    }
+  ]
+}
+```
+
 ## Split Independence
 
 - Training supplies trajectories to the Wiki Maintainer and Skill Proposer.
@@ -46,6 +64,10 @@ Prefer several real episodes representing both success and failure. With a small
 Treat a deterministic platform defect as infrastructure work when the same input always produces the wrong result regardless of Skill guidance. Repair it with ordinary tests before freezing the experiment. Examples include truncated parser input, broken CLI argument forwarding, incorrect file locking, or a scorer that evaluates the wrong artifact.
 
 A Skill may contain executable scripts, but the Inference Agent should consume their frozen versions during a rollout. The proposer may later change those resources as part of an atomic candidate. Do not let the task checkout silently edit the live Skill authority.
+
+## Skill Purpose
+
+The paper's Skill layer pairs `SKILL.md` with `PURPOSE.md`. A created Skill must include both. `PURPOSE.md` should identify the Wiki patterns that support the procedure and briefly record why they justify the Skill. WikiSkill supplies source and baseline metadata for an existing Skill when no purpose file exists. Do not invent a rigid field schema or copy raw trajectories into this file.
 
 ## Freeze Before Running
 
@@ -76,6 +98,12 @@ For command-scored tasks, use an argv array and bounded timeout. The canonical d
 - A rejected proposal may still add useful Wiki knowledge.
 - A candidate exists only after its validation score strictly exceeds the best prior validation score.
 - Test gain reports held-out behavior and must not be used to choose or revise the candidate.
+
+| Result | Interpretation | Next action |
+| --- | --- | --- |
+| `no_action` | Training evidence supports no atomic change | Keep Wiki evidence and collect more episodes |
+| Rejected proposal | Candidate did not strictly improve validation | Keep Wiki, discard the Skill change |
+| Accepted candidate | Validation selected it; test is a held-out report, not another gate | Record test unchanged, review the diff, and make the publication decision without tuning on test |
 
 Inspect every proposal's paths and validation evidence. Reject changes that improve the score by weakening an invariant, changing the scorer, broadening permissions, or encoding a fixture-specific answer.
 

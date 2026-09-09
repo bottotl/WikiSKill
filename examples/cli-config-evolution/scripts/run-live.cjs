@@ -86,20 +86,17 @@ async function main(argv = process.argv.slice(2)) {
       return summary;
     }
 
-    const datasetDigest = invoke(["dataset", "validate", "--dataset", datasetPath, "--scorer", "builtin:command-exit-v1", "--json"], env).at(-1).data.digest;
-    const baseline = invoke(["evolution", "baseline", "--workspace", workspace, "--target", targetSkill, "--json"], env).at(-1).data;
+    const prepared = invoke(["experiment", "prepare", "--workspace", workspace, "--target", targetSkill, "--dataset", datasetPath, "--scorer", "builtin:command-exit-v1", "--json"], env).at(-1);
+    const experimentPath = path.join(outputRoot, "experiment.json");
+    await fs.writeFile(experimentPath, `${JSON.stringify(prepared, null, 2)}\n`, "utf8");
     const evolution = invoke([
-      "evolve", "--workspace", workspace,
-      "--expected-workspace-id", baseline.workspaceId,
-      "--target", targetSkill,
-      "--dataset", datasetPath,
-      "--expected-dataset-digest", datasetDigest,
-      "--expected-target-skill-digest", baseline.targetSkillDigest,
-      "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
-      "--expected-wiki-digest", baseline.wikiDigest,
+      "evolve", "--experiment", experimentPath,
       "--provider", "codex",
       "--model", options.model,
-      "--scorer", "builtin:command-exit-v1",
+      "--reasoning-effort", "low",
+      "--tool-profile", "workspace",
+      "--iterations", "3",
+      "--max-provider-launches", "100",
       "--run-id", runId,
       "--json-events"
     ], env).at(-1);
