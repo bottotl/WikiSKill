@@ -1,0 +1,38 @@
+src/codex-learning.js
+  s_3d74fb41785753::t_f273c688b907ae 166,234,241
+src/claude-learning.js
+  s_3d74fb41785753::t_f273c688b907ae 23,46,100,113,130
+src/audit/run.js
+  s_3d74fb41785753::t_f273c688b907ae 83
+test/core.test.js
+  s_3d74fb41785753::t_489a8dca46bfa7 291
+  s_3d74fb41785753::t_3634de0d9e45a3 296-306
+  s_3d74fb41785753::t_0404397d78c9f3 555
+src/index.js
+  s_3d74fb41785753::t_f273c688b907ae 992-993
+README.md
+  s_3d74fb41785753::t_7c6308f821fb6c 67,191
+test/codex-learning.test.js
+  s_3d74fb41785753::t_0404397d78c9f3 90,96,125-126
+  s_3d74fb41785753::t_cd217153a25c0a 107-108
+src/evolution.js
+  s_3d74fb41785753::t_7c6308f821fb6c 449
+test/claude-learning.test.js
+  s_3d74fb41785753::t_0404397d78c9f3 10,24,28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "5a08278f72cade3410e3d0ad43f3f986803bd8ba",
+  "prompts": {},
+  "sessions": {
+    "s_3d74fb41785753": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a084f5-42c5-7af1-bb3d-d22c3a9f1840",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
