@@ -1,0 +1,94 @@
+test/commit-compiler.test.js
+  s_c9270381ddb8ba::t_b899c0ae733d88 1-29
+test/installed-commit-runtime.test.js
+  s_c9270381ddb8ba::t_f08b3b251467be 51
+  s_8493356b4e254b::t_57b14298ebbae3 11,52
+  s_8493356b4e254b::t_b6c4d991700de1 8-10
+  s_8493356b4e254b::t_cf0d5c177e7979 53-55
+  s_8493356b4e254b::t_99dabf701b902f 1-7,12-50,56-57
+src/repository-snapshot.js
+  s_c9270381ddb8ba::t_4b233736c9ba0b 5-7,10,12,15-30,32,34,39-43
+  s_c9270381ddb8ba::t_13b3aca4535443 1-4,8-9,11,13-14,31,33,35-38,44-45
+test/knowledge-context.test.js
+  s_8493356b4e254b::t_57b14298ebbae3 40-42
+  s_c9270381ddb8ba::t_6df509453922a2 1-39,43-65
+src/knowledge-context.js
+  s_c9270381ddb8ba::t_56b241097e5d44 78
+  s_c9270381ddb8ba::t_f94bcd612a424b 26,42-52,54,76
+  s_c9270381ddb8ba::t_854a8cefd1dddc 53
+  s_c9270381ddb8ba::t_84d738d2be0890 1-25,27-41,55-75,77,79-87,91-99
+  s_8493356b4e254b::t_17ad751ca0bed5 88-90
+src/inference-isolation.js
+  s_c9270381ddb8ba::t_0fcfaa47e7e130 48-49
+  s_c9270381ddb8ba::t_f94bcd612a424b 45
+  s_c9270381ddb8ba::t_1849f66c23c4fd 51-54
+  s_c9270381ddb8ba::t_21c13a1c00d778 1-37,39-41,43-44,46-47,55-60,62-64
+  s_c9270381ddb8ba::t_60be1035dd7267 61
+  s_c9270381ddb8ba::t_854a8cefd1dddc 50
+  s_c9270381ddb8ba::t_2a99dea8727caf 38
+  s_c9270381ddb8ba::t_0f9ac8b730471c 42
+src/dataset-known-fix.js
+  s_c9270381ddb8ba::t_800ec701ac3e93 35-37,43
+src/codex-runner.js
+  s_c9270381ddb8ba::t_84d738d2be0890 155
+  s_8493356b4e254b::t_17ad751ca0bed5 164,167-169,236
+  s_8493356b4e254b::t_4b19ea3e628cca 237
+test/codex-runner.test.js
+  s_8493356b4e254b::t_57b14298ebbae3 115,117-119,122
+  s_8493356b4e254b::t_93b64c21f1067a 104,120-121
+src/evolution.js
+  s_c9270381ddb8ba::t_800ec701ac3e93 257,351
+  s_c9270381ddb8ba::t_f94bcd612a424b 89,93,430-431,450
+  s_8493356b4e254b::t_c8aa8aea63436f 340
+  s_8493356b4e254b::t_a3b2eb1c65ea78 525-527
+src/claude-runner.js
+  s_c9270381ddb8ba::t_84d738d2be0890 43,69,105-113
+  s_c9270381ddb8ba::t_483006c1fe9269 55-56
+  s_c9270381ddb8ba::t_cf4b6105bf47d5 102
+src/runtime-capabilities.js
+  s_c9270381ddb8ba::t_483006c1fe9269 99
+  s_8493356b4e254b::t_17ad751ca0bed5 93
+src/commit-compiler.js
+  s_c9270381ddb8ba::t_70c98655db1d19 1-23,25,27-28,30-38,40-41
+  s_c9270381ddb8ba::t_483006c1fe9269 24,26
+  s_c9270381ddb8ba::t_b9292662e2aaac 42-54
+  s_c9270381ddb8ba::t_854a8cefd1dddc 29
+  s_c9270381ddb8ba::t_c84b9810aee18c 39
+src/cli.js
+  s_c9270381ddb8ba::t_70c98655db1d19 17,170-171
+  s_c9270381ddb8ba::t_b9292662e2aaac 32,167-169
+  s_8493356b4e254b::t_c8aa8aea63436f 19,56,142
+test/runtime-capabilities.test.js
+  s_c9270381ddb8ba::t_92c1ed71172055 55
+  s_8493356b4e254b::t_17ad751ca0bed5 54
+src/index.js
+  s_c9270381ddb8ba::t_800ec701ac3e93 101-104,114,333,351-352
+  s_c9270381ddb8ba::t_f94bcd612a424b 379
+  s_c9270381ddb8ba::t_84d738d2be0890 98-100,357,383,400,403,428-429,450
+test/evolution.test.js
+  s_8493356b4e254b::t_6fa7c83782bf01 535-539,551-552,557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "527dab1ab050f5329ea42187c50cfb007c9bf78e",
+  "prompts": {},
+  "sessions": {
+    "s_8493356b4e254b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a08157-fb73-7162-88c8-5dff58525d9c",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    },
+    "s_c9270381ddb8ba": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a080fa-9b3b-70e0-9164-918c229d2f2f",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
