@@ -1,0 +1,51 @@
+test/runtime-capabilities.test.js
+  s_3d74fb41785753::t_abb99342cf643e 8,43-48
+  s_3d74fb41785753::t_d651bb9dec99a1 49-50
+src/runtime-capabilities.js
+  s_3d74fb41785753::t_b202b92971dea4 10,79,83-87,92-96,158
+src/command-scorer.js
+  s_3d74fb41785753::t_b202b92971dea4 9,105,126
+skills/wikiskill-evolution/scripts/audit-run.js
+  s_3d74fb41785753::t_1b4c2b371a009a 79,84,106
+  s_3d74fb41785753::t_0d7d7c2bfcff16 91-92,115-116
+skills/wikiskill-evolution/SKILL.md
+  s_3d74fb41785753::t_14bd1149e46d7b 24,26,40
+  s_3d74fb41785753::t_e030ef2378b9a3 43-44
+  s_3d74fb41785753::t_a1811ac01a37d3 33
+test/meta-skill.test.js
+  s_3d74fb41785753::t_a1811ac01a37d3 52,78,99-113,185-188,205-208,226-228
+src/cli.js
+  s_3d74fb41785753::t_b202b92971dea4 210-211
+  s_3d74fb41785753::t_14bd1149e46d7b 15-16,33-34,47-49,171-191
+skills/wikiskill-evolution/references/host-integration.md
+  s_3d74fb41785753::t_a1811ac01a37d3 23-24
+src/index.js
+  s_3d74fb41785753::t_0d7d7c2bfcff16 19,331-332,374,410,429,930-931,947,964,1006,1049,1054
+  s_3d74fb41785753::t_83917c83014f32 1146
+test/workspace.test.js
+  s_3d74fb41785753::t_abb99342cf643e 105-111
+test/evolution.test.js
+  s_3d74fb41785753::t_9aacd58770a935 160
+README.md
+  s_3d74fb41785753::t_51036e04b6518d 200,203-210
+src/evolution.js
+  s_3d74fb41785753::t_b202b92971dea4 8,262
+skills/wikiskill-evolution/references/evolution-guidelines.md
+  s_3d74fb41785753::t_a1811ac01a37d3 70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "c5a70ae8cc70864d0b374df1a206e2bfb7178fe5",
+  "prompts": {},
+  "sessions": {
+    "s_3d74fb41785753": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a084f5-42c5-7af1-bb3d-d22c3a9f1840",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
