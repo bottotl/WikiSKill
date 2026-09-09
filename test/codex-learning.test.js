@@ -87,13 +87,13 @@ test("Codex maintainer turns sampled training evidence into constrained Wiki wri
   assert.equal(launches[0].reasoningEffort, "low");
 });
 
-test("Codex proposer reads four constrained training traces before returning one proposal", async (t) => {
+test("Codex proposer reads only the training traces it selects", async (t) => {
   const wikiRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-codex-proposer-"));
   t.after(() => fs.rmSync(wikiRoot, { recursive: true, force: true }));
   const readIds = [];
   const proposer = createProposer({ model: "test-model", timeoutMs: 1_000 }, {
     spawn: responseSequenceSpawn([
-      { traceReads: ["trace-4", "trace-2", "trace-1", "trace-3"] },
+      { traceReads: ["trace-2"] },
       { action: "patch", skillId: "gate-skill", files: { "SKILL.md": "# Gate\nImproved fallback.\n" } }
     ], (prompt, args, index) => {
       assert.ok(args.includes("read-only"));
@@ -104,7 +104,8 @@ test("Codex proposer reads four constrained training traces before returning one
         assert.doesNotMatch(prompt, /body-4/u);
       } else {
         assert.match(prompt, /Restricted Trace Reads/u);
-        assert.match(prompt, /body-4/u);
+        assert.match(prompt, /body-2/u);
+        assert.doesNotMatch(prompt, /body-4/u);
         assert.match(prompt, /validation\/test/u);
         assert.match(prompt, /PURPOSE[.]md/u);
       }
@@ -121,8 +122,8 @@ test("Codex proposer reads four constrained training traces before returning one
       return { id, events: [{ type: "assistant", text: `body-${id.slice(-1)}` }] };
     }
   });
-  assert.deepEqual(readIds, ["trace-4", "trace-2", "trace-1", "trace-3"]);
-  assert.deepEqual(proposal.traceReads, ["trace-4", "trace-2", "trace-1", "trace-3"]);
+  assert.deepEqual(readIds, ["trace-2"]);
+  assert.deepEqual(proposal.traceReads, ["trace-2"]);
   assert.equal(proposal.skillId, "gate-skill");
 });
 

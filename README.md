@@ -64,7 +64,7 @@ verifier、彼此独立的 train/val/test 划分，以及能反映目标质量�
 1. 用当前 Skills 运行完整 validation，得到 baseline。
 2. 在 training split 上生成执行轨迹。
 3. Wiki Maintainer 根据成功和失败轨迹增量更新 Wiki。
-4. Skill Proposer 先选择至少 4 条 training trajectory，再读取正文。
+4. Skill Proposer 根据 Wiki 和训练结果按需选择并读取当前 training trajectory。
 5. Proposer 产生一个原子 Skill proposal。
 6. 在完整 validation split 上评估 candidate。
 7. 只有 `candidate score > best score` 才接受，否则回滚 Skills，保留 Wiki。
@@ -188,7 +188,7 @@ wikiskill status --workspace . --run <run-id> --json
 
 `--iterations`、`--reasoning-effort`、`--tool-profile` 和 `--max-provider-launches` 都是冻结运行配置。K 接受正安全整数，不设 3 次的通用上限。`workspace` 允许 Inference Agent 修改独立任务工作区，`none` 不提供工具；内置 command-exit scorer 使用 `workspace`，exact-output scorer 使用 `none`。最坏情况 Provider 启动次数仅作预估，预算无需覆盖全部预估迭代；每次启动前记录并扣减实际启动次数，resume/fork 参数、配置漂移或预算耗尽会阻止该次启动。Provider 启动次数不等于模型 API 调用次数或费用。
 
-当前采样次数是实验设置：command-exit 在训练任务不足 4 个时重复执行，以提供至少 4 条真实训练轨迹；内置其他运行路径采用每任务训练 2 次、评估 3 次。论文附录要求 Proposer 读取至少 4 条轨迹，并未规定这些重复次数或固定 4/2/2 划分。baseline validation 满分时按算法提前结束，不为凑轨迹启动训练。
+当前 rollout 次数是实现配置：command-exit 和外部模块路径默认每任务 1 次，内置其他运行路径采用每任务训练 2 次、评估 3 次。论文附录规定 Maintainer 每轮最多采样 5 条失败和 3 条成功轨迹，并将单条日志截断到 15,000 字符；它没有规定 Proposer 的最小读取数量。baseline validation 满分时按算法提前结束。
 
 ## Experiment Authoring Skill
 

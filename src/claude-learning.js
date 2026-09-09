@@ -20,7 +20,7 @@ const MAINTAINER_SCHEMA = {
     } } }
   }
 };
-const PROPOSER_SELECTION_SCHEMA = { type: "object", additionalProperties: false, required: ["traceReads"], properties: { traceReads: { type: "array", minItems: 4, uniqueItems: true, items: { type: "string" } } } };
+const PROPOSER_SELECTION_SCHEMA = { type: "object", additionalProperties: false, required: ["traceReads"], properties: { traceReads: { type: "array", uniqueItems: true, items: { type: "string" } } } };
 const PROPOSAL_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -43,7 +43,7 @@ const systemPromptFor = (role) => {
   ].join("\n");
   if (role === "proposer-select") return [
     "You are the WikiSkill Skill Proposer selecting training evidence. Do not propose a Skill change in this phase.",
-    "Return exactly one prediction object with one field: {traceReads:[...]}. Select at least four distinct ids from availableTraces."
+    "Return exactly one prediction object with one field: {traceReads:[...]}. Select only the distinct training traces needed for the proposal; return an empty array only when no Skill change is warranted."
   ].join("\n");
   return [
     "你是 WikiSkill Skill Proposer。仅使用提供的 Wiki、当前 Skills、训练结果与选定的训练轨迹。可以参考 skill-impact.md 中的 validation 汇总分数、候选 diff 与接受/拒绝结果；不得读取或推测 validation/test 的任务内容、答案或执行轨迹，test 分数不参与候选选择。",
@@ -97,7 +97,7 @@ const createProposer = (config = {}) => async (input) => {
   const selectionLaunchRef = `learning:${input.attempt}:${input.iteration}:proposer-select`;
   const selectionTurn = await runRole("proposer-select", selectionLaunchRef, config, {
     phase: "select-training-trajectories",
-    instruction: "Return prediction {traceReads:[...]} with at least four distinct ids selected from availableTraces. Do not propose a Skill change yet.",
+    instruction: "Return prediction {traceReads:[...]} with only the distinct ids needed from availableTraces. Use an empty array only when no Skill change is warranted. Do not propose a Skill change yet.",
     wiki: input.wiki,
     skills: input.skills,
     allowedNewSkillIds: input.allowedNewSkillIds || [],
@@ -110,7 +110,7 @@ const createProposer = (config = {}) => async (input) => {
   if (!Array.isArray(selection.traceReads)) throw new Error("WikiSkill Claude proposer selection must return traceReads.");
   const selected = [...new Set(selection.traceReads)];
   const available = new Set(input.availableTraces.map((trace) => trace.id));
-  if (selected.length < Math.min(4, input.availableTraces.length) || selected.some((id) => !available.has(id))) throw new Error("WikiSkill Claude proposer selected invalid training traces.");
+  if (selected.some((id) => !available.has(id))) throw new Error("WikiSkill Claude proposer selected invalid training traces.");
   const traces = selected.map((id) => ({ id, trace: input.readTrace(id) }));
   const proposalLaunchRef = `learning:${input.attempt}:${input.iteration}:proposer`;
   const proposalTurn = await runRole("proposer", proposalLaunchRef, config, {
@@ -127,6 +127,7 @@ const createProposer = (config = {}) => async (input) => {
   const allowed = new Set(["action", "skillId", "files"]);
   if (Object.keys(response).some((key) => !allowed.has(key))) throw new Error("WikiSkill Claude proposer returned an unknown field.");
   if (typeof response.action !== "string") throw new Error("WikiSkill Claude proposer response is missing action.");
+  if (response.action !== "no_action" && selected.length === 0) throw new Error("WikiSkill Claude Skill-changing proposal must read a training trace.");
   return { ...response, traceReads: selected };
 };
 

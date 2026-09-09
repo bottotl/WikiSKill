@@ -288,9 +288,20 @@ test("supports paper conformance empty-S0 mode without inspecting Skills", async
   ] };
   const manifest = await createRun({ repo, mode: "empty", targetSkills: [], contextSkills: [], dataset, stateRoot, runId: "run-empty" });
   assert.equal(manifest.mode, "empty");
-  await runEvolution(manifest.runRoot, { proposer: async (input) => { const traceReads = readFourTraces(input); return { action: "no_action", traceReads }; } });
+  await runEvolution(manifest.runRoot, { proposer: async () => ({ action: "no_action", traceReads: [] }) });
   const state = JSON.parse(await fs.readFile(path.join(manifest.runRoot, "runs/state.json"), "utf8"));
   assert.equal(state.status, "completed");
+});
+
+test("requires evidence only when the Proposer changes a Skill", async () => {
+  const repo = await makeRepo();
+  const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-state-"));
+  const dataset = { schema: "wikiskill.dataset.v1", tasks: [task("train", "train"), task("val", "val"), task("test", "test")] };
+  const manifest = await createRun({ repo, skillRoots: [".agents/skills"], targetSkills: ["one"], dataset, stateRoot, runId: "run-no-proposal-evidence" });
+  await assert.rejects(runEvolution(manifest.runRoot, {
+    adapter: { score: () => ({ score: 0 }) },
+    proposer: async () => ({ action: "patch", skillId: "one", files: { "SKILL.md": "# Unsupported\n" }, traceReads: [] })
+  }), /must read at least one current training trace/u);
 });
 
 test("never exposes groundTruth or evaluator to the inference runner", async () => {
@@ -541,7 +552,7 @@ test("creates a new Skill only inside the declared newSkillRoot", async () => {
   const manifest = await createRun({ repo, skillRoots: [".agents/skills"], targetSkills: ["one"], newSkillRoot: ".agents/skills", dataset, stateRoot, runId: "run-create" });
   const runner = async ({ skills }) => ({ prediction: { value: skills.target["new-skill"] ? "new" : "old" }, events: [] });
   const adapter = { extractPrediction: ({ result }) => result.prediction, score: ({ prediction, groundTruth }) => ({ score: prediction.value === groundTruth.value ? 1 : 0 }) };
-  await runEvolution(manifest.runRoot, { runner, adapter, proposer: async (input) => { const traceReads = readFourTraces(input); return { action: "create", skillId: "new-skill", files: { "SKILL.md": "# New Skill\n", "PURPOSE.md": "# Purpose\n\n- Supporting pattern: observed.md\n" }, traceReads }; } });
+  await runEvolution(manifest.runRoot, { runner, adapter, proposer: async (input) => { const traceReads = [input.availableTraces[0].id]; input.readTrace(traceReads[0]); return { action: "create", skillId: "new-skill", files: { "SKILL.md": "# New Skill\n", "PURPOSE.md": "# Purpose\n\n- Supporting pattern: observed.md\n" }, traceReads }; } });
   const dryRun = await applyRun(manifest.runRoot, { repo, dryRun: true });
   assert.ok(dryRun.changedPaths.includes(".agents/skills/new-skill/SKILL.md"));
   assert.ok(dryRun.changedPaths.includes(".agents/skills/new-skill/PURPOSE.md"));

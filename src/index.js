@@ -964,7 +964,6 @@ async function runEvolution(runOrId, options = {}) {
           train.push(await makeTrace({ runRoot, task, split: "train", phase: "training", iteration, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: undefined, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}`), recordInferenceInvocation }));
         }
       }
-      if (train.length < 4) throw new WikiSkillError("The configured training rollout produced fewer than four trajectories required by the Proposer trace-read contract.");
       const sampled = sampleTraces(train);
       await runMaintainer(runRoot, iteration, sampled, { ...options, manifest, attempt, recordLearningInvocation });
       const availableTraces = train.map((item) => ({
@@ -990,10 +989,8 @@ async function runEvolution(runOrId, options = {}) {
         return { trajectoryId: item.trace.id, taskId: item.trace.taskId, prediction: item.trace.prediction, groundTruthSummary, score: item.trace.score };
       }), availableTraces, readTrace });
       const requestedTraceReads = Array.isArray(proposal?.traceReads) ? [...new Set(proposal.traceReads)] : [];
-      const minimumTraceReads = Math.min(4, train.length);
-      if (requestedTraceReads.length < minimumTraceReads || requestedTraceReads.some((id) => !availableTraces.some((trace) => trace.id === id))) {
-        throw new WikiSkillError(`Proposer must select at least ${minimumTraceReads} available training traces.`);
-      }
+      if (requestedTraceReads.some((id) => !availableTraces.some((trace) => trace.id === id))) throw new WikiSkillError("Proposer selected an unavailable training trace.");
+      if (proposal?.action !== "no_action" && requestedTraceReads.length === 0) throw new WikiSkillError("A Skill-changing proposal must read at least one current training trace.");
       if (requestedTraceReads.some((id) => !readIds.has(id))) throw new WikiSkillError("Proposer declared a training trace that it did not read.");
       const proposalPath = path.join(runRoot, "runs", "proposals", `iter-${String(iteration).padStart(2, "0")}-attempt-${String(attempt).padStart(2, "0")}.json`);
       await fsp.writeFile(proposalPath, json(proposal));

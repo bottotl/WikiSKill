@@ -163,7 +163,7 @@ const maintainerPrompt = (input) => [
 
 const traceSelectionPrompt = (input) => [
   "你是 WikiSkill Skill Proposer。先选择需要检查的 training trajectories，不要在这一步提出 Skill 修改。",
-  "只返回一个 JSON object：{traceReads:[...]}。必须从 Available Training Trajectories 中选择至少 4 个不同 id。",
+  "只返回一个 JSON object：{traceReads:[...]}。从 Available Training Trajectories 中按需选择不同 id；只有确定不需要修改 Skill 时才返回空数组。",
   "## Wiki",
   JSON.stringify(input.wiki),
   "## Current Skills",
@@ -231,13 +231,14 @@ const createProposer = (config = {}, deps = {}) => async (input) => {
   if (!Array.isArray(selection.traceReads)) throw new Error("WikiSkill Codex proposer selection must return traceReads.");
   const selected = [...new Set(selection.traceReads)];
   const available = new Set(input.availableTraces.map((trace) => trace.id));
-  if (selected.length < Math.min(4, input.availableTraces.length) || selected.some((id) => !available.has(id))) throw new Error("WikiSkill Codex proposer selected invalid training traces.");
+  if (selected.some((id) => !available.has(id))) throw new Error("WikiSkill Codex proposer selected invalid training traces.");
   const readTraces = selected.map((id) => ({ id, trace: input.readTrace(id) }));
   const proposalLaunchRef = `learning:${input.attempt}:${input.iteration}:proposer`;
   const proposalTurn = await runLearningTurn("proposer", proposalLaunchRef, config, proposerPrompt({ ...input, readTraces }), input.wikiRoot, deps);
   const response = proposalTurn.response;
   await input.recordInvocation?.({ schema: "wikiskill.learning-invocation.v1", launchRef: proposalLaunchRef, role: "proposer", provider: proposalTurn.provider });
   if (typeof response.action !== "string") throw new Error("WikiSkill Codex proposer response is missing action.");
+  if (response.action !== "no_action" && selected.length === 0) throw new Error("WikiSkill Codex Skill-changing proposal must read a training trace.");
   return {
     ...response,
     traceReads: selected

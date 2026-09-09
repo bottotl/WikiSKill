@@ -445,9 +445,8 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     proposer: runtimeLearning ? digest(JSON.stringify({ descriptor: runtimeLearning.descriptor, config: runtimeLearningFrozenConfig })) : await componentDigest(options.proposer || learningAgent, proposerModule, learningAgent),
     model: digest(JSON.stringify(model))
   };
-  // 当前实验设置：小型代码任务重复采样以提供四条真实训练轨迹；不是论文规定的通用采样次数。
   const rolloutPolicy = runtime?.scorerRef === "builtin:command-exit-v1"
-    ? { trainingRolloutsPerTask: Math.max(1, Math.ceil(4 / tasks.filter(task => task.split === "train").length)), evaluationRolloutsPerTask: 1 }
+    ? { trainingRolloutsPerTask: 1, evaluationRolloutsPerTask: 1 }
     : runtimeRunner && runtimeAdapter
       ? { trainingRolloutsPerTask: 2, evaluationRolloutsPerTask: 3 }
     : { trainingRolloutsPerTask: 1, evaluationRolloutsPerTask: 1 };

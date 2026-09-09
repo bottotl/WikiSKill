@@ -7,7 +7,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { createMaintainer, createProposer } = require("../src/claude-learning");
 
-test("Claude proposer uses the frozen model and returns one atomic proposal after reading four traces", async () => {
+test("Claude proposer uses the frozen model and reads only selected training traces", async () => {
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-claude-learning-"));
 const script = path.join(workdir, "fake-claude.cjs");
   await fs.writeFile(script, `const args = process.argv.slice(2);
@@ -21,11 +21,11 @@ const selection = prompt.includes("select-training-trajectories");
 if ((selection && !systemPrompt.includes("one field: {traceReads")) || (!selection && (!systemPrompt.includes("action patch, create, or no_action") || !systemPrompt.includes("PURPOSE.md")))) process.exit(4);
 if ((selection && schema.required[0] !== "traceReads") || (!selection && schema.required[0] !== "action")) process.exit(5);
 if ((selection && prompt.includes("selected-trace-body")) || (!selection && !prompt.includes("selected-trace-body"))) process.exit(3);
-const prediction = selection ? {traceReads:["trace-4","trace-2","trace-1","trace-3"]} : {action:"no_action"};
+const prediction = selection ? {traceReads:["trace-2"]} : {action:"no_action"};
 process.stdout.write(JSON.stringify({type:"result",subtype:"success",is_error:false,terminal_reason:"completed",session_id:"learning-session",result:"proposal",structured_output:{prediction}}));
 `);
   const proposer = createProposer({ model: "frozen-model", executable: process.execPath, executableArgs: [script], timeoutMs: 10_000 });
-  const traceReads = ["trace-4", "trace-2", "trace-1", "trace-3"];
+  const traceReads = ["trace-2"];
   const proposal = await proposer({
     wikiRoot: workdir,
     iteration: 1,

@@ -80,6 +80,7 @@ const auditRun = (runRoot, { workspace } = {}) => {
     if (history.accepted !== improves) blockers.push(`Iteration ${history.iteration} acceptance does not match strict validation gain.`);
     if (history.accepted) best = history.candidateValidationScore;
     const proposal = readJson(path.join(runRoot, history.proposalPath));
+    if (proposal.action !== "no_action" && (!Array.isArray(proposal.traceReads) || proposal.traceReads.length === 0)) blockers.push(`Iteration ${history.iteration} Skill-changing proposal reads no training trace.`);
     for (const traceId of proposal.traceReads || []) {
       const trace = traceById.get(traceId);
       if (!trace) blockers.push(`Proposal reads unknown trace ${traceId}.`);
