@@ -1,0 +1,40 @@
+acceptance/black-box.js
+  s_3d74fb41785753::t_449fa0f23eedc0 41,63-67,77,79-80
+README.md
+  s_3d74fb41785753::t_1cdaac010f6fa8 44-45
+  s_3d74fb41785753::t_c2ad0ae2fbe323 185,197-198,201,204-207,213-216,267
+skills/wikiskill-evolution/SKILL.md
+  s_3d74fb41785753::t_fb7213c3925068 25,28,33-38,40,43-44,50
+src/index.js
+  s_3d74fb41785753::t_9a97a6dbc9a7d3 333
+  s_3d74fb41785753::t_482297a38b6c9a 410,930-931
+skills/wikiskill-evolution/references/host-integration.md
+  s_3d74fb41785753::t_089e05119b6276 23
+src/cli.js
+  s_3d74fb41785753::t_2673fafab98a3e 18,36,146-165,171-182,195,209,228-242,244,323-324
+  s_3d74fb41785753::t_78328aba8af115 166-170
+skills/wikiskill-evolution/references/evolution-guidelines.md
+  s_3d74fb41785753::t_fb7213c3925068 114-116
+fixtures/basic-flywheel/README.md
+  s_3d74fb41785753::t_20f0a26d2e9346 23-24
+examples/cli-config-evolution/scripts/run-live.cjs
+  s_3d74fb41785753::t_20f0a26d2e9346 89-94,103-108
+examples/cli-config-evolution/README.md
+  s_3d74fb41785753::t_20f0a26d2e9346 24-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "fd6d4e5fb4766a1a539af6b99c99a1a4d6f4013c",
+  "prompts": {},
+  "sessions": {
+    "s_3d74fb41785753": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a084f5-42c5-7af1-bb3d-d22c3a9f1840",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
