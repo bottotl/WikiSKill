@@ -3,6 +3,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const core = require("./index");
+const { proposeCandidate, reviewCandidate, listCandidates } = require("./publishing");
 
 const HELP = `wikiskill init <workspace> [--mode direct|zero-source-write] [--dry-run] --json
 wikiskill doctor --workspace <workspace> --json
@@ -25,12 +26,15 @@ wikiskill evolve --experiment <experiment.json> [--runtime-profile <profile.json
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
 wikiskill candidate diff --workspace <workspace> --candidate <id> --json
+wikiskill candidate list --workspace <workspace> [--limit <n>] [--cursor <id>] --json
+wikiskill candidate propose --workspace <workspace> --input <proposal.json> --json
+wikiskill candidate review --workspace <workspace> --candidate <id> --input <review.json> --json
 wikiskill candidate apply --workspace <workspace> --candidate <id> [--dry-run] --json
 wikiskill rollback --workspace <workspace> --receipt <id> --json
 `;
 
 const SUBCOMMANDS = Object.freeze({
-  candidate: new Set(["diff", "apply"]),
+  candidate: new Set(["diff", "apply", "propose", "review", "list"]),
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   evolution: new Set(["baseline"]),
   experiment: new Set(["prepare", "audit", "run"]),
@@ -40,6 +44,8 @@ const SUBCOMMANDS = Object.freeze({
 });
 
 const VALUE_FLAGS = Object.freeze({
+  "--limit": "limit",
+  "--cursor": "cursor",
   "--run-id": "runId",
   "--run": "run",
   "--workspace": "workspace",
@@ -335,7 +341,10 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
     } else if (options.command === "candidate") {
       if (options.subcommand === "diff") data = await core.diffCandidate(options.workspace, options.candidate);
       else if (options.subcommand === "apply") data = await core.applyCandidate(options.workspace, options.candidate, options);
-      else throw new Error("Only `candidate diff` and `candidate apply` are supported.");
+      else if (options.subcommand === "propose") data = await proposeCandidate(options.workspace, JSON.parse(await fs.readFile(options.input, "utf8")));
+      else if (options.subcommand === "review") data = await reviewCandidate(options.workspace, options.candidate, JSON.parse(await fs.readFile(options.input, "utf8")));
+      else if (options.subcommand === "list") data = await listCandidates(options.workspace, { limit: options.limit, cursor: options.cursor });
+      else throw new Error("Unknown candidate command.");
     } else if (options.command === "status") data = await core.statusWorkspaceEvolution(options.workspace, options.run, options);
     else if (options.command === "rollback") data = await core.rollbackReceipt(options.workspace, options.receipt);
     else throw new Error(`Unknown command: ${options.command}`);

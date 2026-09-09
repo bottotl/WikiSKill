@@ -81,7 +81,8 @@ const loadCandidate = async (workspace, candidateId) => {
   if (!SAFE_ID.test(candidateId || "")) throw new Error("Candidate id must be a safe identifier.");
   const root = path.join(workspace, ".wikiskill", "candidates", candidateId);
   const candidate = JSON.parse(await fs.readFile(path.join(root, "candidate.json"), "utf8"));
-  if (candidate.schema !== "wikiskill.candidate.v1" || candidate.candidateId !== candidateId || !SAFE_ID.test(candidate.targetSkill || "") || candidate.status !== "validation_accepted") throw new Error("Candidate manifest is invalid.");
+  if (candidate.schema !== "wikiskill.candidate.v1" || candidate.candidateId !== candidateId || !SAFE_ID.test(candidate.targetSkill || "") || !["validation_accepted", "pending_review"].includes(candidate.status)) throw new Error("Candidate manifest is invalid.");
+  if (candidate.status === "pending_review" && candidate.origin !== "daily_learning") throw new Error("Pending candidate requires daily learning provenance.");
   const skillRoot = path.join(root, "skill");
   if (await treeDigest(skillRoot) !== candidate.resultDigest) throw new Error("Candidate result digest is invalid.");
   const expectedId = `candidate-${digest(`${candidate.targetSkill}\0${candidate.baselineDigest}\0${candidate.resultDigest}`).slice("sha256:".length, "sha256:".length + 24)}`;
@@ -113,10 +114,23 @@ async function diffCandidate(workspaceInput, candidateId) {
   return { candidate, ...(await buildDiff(liveRoot, skillRoot, candidate.targetSkill)) };
 }
 
-async function applyCandidate(workspaceInput, candidateId, { dryRun = false } = {}) {
+async function applyCandidateUnlocked(workspaceInput, candidateId, { dryRun = false } = {}) {
   const { workspace, config } = await loadWorkspace(workspaceInput);
+  const loaded = await loadCandidate(workspace, candidateId);
+  if (!dryRun && await treeDigestOrNull(path.join(workspace, ".wikiskill", "skills", loaded.candidate.targetSkill)) === loaded.candidate.resultDigest) {
+    for (const entry of await fs.readdir(path.join(workspace, ".wikiskill", "receipts"))) {
+      if (!SAFE_ID.test(entry)) continue;
+      const file = path.join(workspace, ".wikiskill", "receipts", entry, "receipt.json");
+      if (!await exists(file)) continue;
+      const receipt = JSON.parse(await fs.readFile(file, "utf8"));
+      if (receipt.schema === "wikiskill.apply-receipt.v1" && receipt.candidateId === candidateId && receipt.afterDigest === loaded.candidate.resultDigest) return { candidateId, receipt, changedPaths: receipt.changedPaths, dryRun: false, reused: true };
+    }
+  }
   const preview = await diffCandidate(workspace, candidateId);
   if (dryRun) return { ...preview, dryRun: true };
+  const review = await readReview(workspace, candidateId);
+  if (review?.verdict === "rejected") throw new Error("Candidate was rejected.");
+  if (preview.candidate.origin === "daily_learning" && (review?.verdict !== "approved" || review.resultDigest !== preview.candidate.resultDigest)) throw new Error("Daily learning candidate requires explicit review before publication.");
   const { candidate, skillRoot } = await loadCandidate(workspace, candidateId);
   const liveRoot = path.join(workspace, ".wikiskill", "skills", candidate.targetSkill);
   const runtime = path.join(workspace, ".wikiskill", "runtime");
@@ -161,6 +175,16 @@ async function applyCandidate(workspaceInput, candidateId, { dryRun = false } = 
   }
 }
 
+async function applyCandidate(workspaceInput, candidateId, options = {}) {
+  if (options.dryRun) return applyCandidateUnlocked(workspaceInput, candidateId, options);
+  const { workspace } = await loadWorkspace(workspaceInput);
+  const lockPath = path.join(workspace, ".wikiskill", "runtime", "publish.lock");
+  const lock = await fs.open(lockPath, "wx").catch(() => { throw new Error("Another Skill publication is active; inspect publish.lock if interrupted."); });
+  await lock.writeFile(json({ pid: process.pid, candidateId }));
+  try { return await applyCandidateUnlocked(workspaceInput, candidateId, options); }
+  finally { await lock.close(); await fs.unlink(lockPath); }
+}
+
 async function rollbackReceipt(workspaceInput, receiptId) {
   const { workspace, config } = await loadWorkspace(workspaceInput);
   if (!SAFE_ID.test(receiptId || "")) throw new Error("Receipt id must be a safe identifier.");
@@ -199,4 +223,106 @@ async function rollbackReceipt(workspaceInput, receiptId) {
   }
 }
 
-module.exports = { applyCandidate, diffCandidate, rollbackReceipt };
+const reviewPath = (workspace, id) => path.join(workspace, ".wikiskill", "runtime", "candidate-reviews", `${id}.json`);
+const readReview = async (workspace, id) => {
+  try { return JSON.parse(await fs.readFile(reviewPath(workspace, id), "utf8")); }
+  catch (error) { if (error.code === "ENOENT") return null; throw error; }
+};
+
+async function proposeCandidate(workspaceInput, input) {
+  const { workspace } = await loadWorkspace(workspaceInput);
+  if (!input || !SAFE_ID.test(input.targetSkill || "") || !Array.isArray(input.files) || !input.files.length) throw new Error("A target Skill and files are required.");
+  for (const key of ["summary", "reason"]) if (typeof input[key] !== "string" || !input[key].trim()) throw new Error(`${key} is required.`);
+  if (!Array.isArray(input.evidenceRefs) || !input.evidenceRefs.length || input.evidenceRefs.some(ref => typeof ref !== "string" || !ref.trim())) throw new Error("Learning evidence references are required.");
+  const liveRoot = path.join(workspace, ".wikiskill", "skills", input.targetSkill);
+  const baselineDigest = await treeDigestOrNull(liveRoot);
+  if (input.baselineDigest !== baselineDigest) throw new Error("Live Skill changed; read its current baseline before proposing.");
+  if (input.supersedes !== undefined) {
+    const previous = (await loadCandidate(workspace, input.supersedes)).candidate;
+    if (previous.origin !== "daily_learning" || previous.targetSkill !== input.targetSkill || previous.baselineDigest !== baselineDigest || (await readReview(workspace, input.supersedes))?.verdict === "approved") throw new Error("Only a matching pending daily proposal may be revised.");
+  }
+  if (baselineDigest !== null) {
+    const receipts = await fs.readdir(path.join(workspace, ".wikiskill", "receipts"));
+    let owned = false;
+    for (const id of receipts.filter(id => SAFE_ID.test(id))) {
+      const file = path.join(workspace, ".wikiskill", "receipts", id, "receipt.json");
+      if (!await exists(file)) continue;
+      const receipt = JSON.parse(await fs.readFile(file, "utf8"));
+      if (receipt.schema === "wikiskill.apply-receipt.v1" && receipt.targetSkill === input.targetSkill && receipt.afterDigest === baselineDigest) owned = true;
+    }
+    if (!owned) throw new Error("This Skill has no matching managed publication receipt; preserve user or externally installed content.");
+  }
+  const seen = new Set();
+  for (const file of input.files) {
+    if (!file || typeof file.path !== "string" || typeof file.content !== "string" || file.path.includes("\\") || file.path.split("/").some(part => !part || part.startsWith(".")) || path.isAbsolute(file.path)) throw new Error("Unsafe Skill file path.");
+    if (!/^(SKILL\.md|PURPOSE\.md|(?:references|scripts|assets)\/.+)$/u.test(file.path) || seen.has(file.path.toLowerCase())) throw new Error("Unsupported or duplicate Skill file.");
+    seen.add(file.path.toLowerCase());
+  }
+  const entry = input.files.find(file => file.path === "SKILL.md");
+  const frontmatter = entry?.content.match(/^---\r?\n([\s\S]+?)\r?\n---(?:\r?\n|$)/u)?.[1];
+  const declaredName = frontmatter?.match(/^name:[ \t]*([A-Za-z0-9._-]+)[ \t]*$/mu)?.[1];
+  if (!frontmatter || declaredName !== input.targetSkill || !/^description:[ \t]*\S/mu.test(frontmatter)) throw new Error("SKILL.md must declare its exact name and description in frontmatter.");
+  const stage = path.join(workspace, ".wikiskill", "runtime", `proposal-${crypto.randomUUID()}`);
+  await fs.mkdir(path.join(stage, "skill"), { recursive: true });
+  try {
+    for (const file of input.files) {
+      const target = path.join(stage, "skill", file.path);
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, file.content, { flag: "wx" });
+    }
+    const resultDigest = await treeDigest(path.join(stage, "skill"));
+    if (resultDigest === baselineDigest) return { candidate: null, noChange: true };
+    const candidateId = `candidate-${digest(`${input.targetSkill}\0${baselineDigest}\0${resultDigest}`).slice(7, 31)}`;
+    const finalRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+    if (await exists(finalRoot)) return { candidate: (await loadCandidate(workspace, candidateId)).candidate, reused: true };
+    const candidate = { schema: "wikiskill.candidate.v1", candidateId, targetSkill: input.targetSkill, status: "pending_review", origin: "daily_learning", baselineDigest, resultDigest, summary: input.summary, reason: input.reason, evidenceRefs: input.evidenceRefs, createdAt: new Date().toISOString() };
+    await fs.writeFile(path.join(stage, "candidate.json"), json(candidate), { flag: "wx" });
+    await fs.rename(stage, finalRoot);
+    await sealReadOnly(finalRoot);
+    if (input.supersedes && input.supersedes !== candidateId) {
+      const previous = (await loadCandidate(workspace, input.supersedes)).candidate;
+      await reviewCandidate(workspace, input.supersedes, { verdict: "rejected", reviewer: "daily-learning-revision", reason: `被新候选 ${candidateId} 替代。`, expectedDigest: previous.resultDigest });
+    }
+    return { candidate, reused: false };
+  } finally { await fs.rm(stage, { recursive: true, force: true }); }
+}
+
+async function reviewCandidate(workspaceInput, candidateId, input) {
+  const { workspace } = await loadWorkspace(workspaceInput);
+  const { candidate } = await loadCandidate(workspace, candidateId);
+  if (!input || !["approved", "rejected"].includes(input.verdict) || typeof input.reviewer !== "string" || !input.reviewer.trim() || typeof input.reason !== "string" || !input.reason.trim()) throw new Error("Review requires verdict, reviewer and reason.");
+  if (input.expectedDigest !== candidate.resultDigest) throw new Error("Review digest does not match the displayed candidate.");
+  if (input.verdict === "approved") await diffCandidate(workspace, candidateId);
+  const review = { verdict: input.verdict, reviewer: input.reviewer, reason: input.reason, resultDigest: candidate.resultDigest, reviewedAt: new Date().toISOString() };
+  const target = reviewPath(workspace, candidateId);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const stage = `${target}.${crypto.randomUUID()}`;
+  await fs.writeFile(stage, json(review));
+  await fs.rename(stage, target);
+  return { candidate, review };
+}
+
+async function listCandidates(workspaceInput, { limit = 20, cursor = "" } = {}) {
+  const { workspace } = await loadWorkspace(workspaceInput);
+  if (!Number.isSafeInteger(Number(limit)) || Number(limit) < 1 || Number(limit) > 100) throw new Error("limit must be between 1 and 100.");
+  const ids = (await fs.readdir(path.join(workspace, ".wikiskill", "candidates"))).filter(id => id.startsWith("candidate-") && SAFE_ID.test(id) && id > cursor).sort();
+  const items = [];
+  const appliedDigests = new Map();
+  for (const id of await fs.readdir(path.join(workspace, ".wikiskill", "receipts"))) {
+    if (!SAFE_ID.test(id)) continue;
+    const file = path.join(workspace, ".wikiskill", "receipts", id, "receipt.json");
+    if (!await exists(file)) continue;
+    const receipt = JSON.parse(await fs.readFile(file, "utf8"));
+    if (receipt.schema === "wikiskill.apply-receipt.v1") appliedDigests.set(receipt.candidateId, receipt.afterDigest);
+  }
+  for (const id of ids.slice(0, Number(limit))) {
+    const { candidate, skillRoot } = await loadCandidate(workspace, id);
+    const currentDigest = await treeDigestOrNull(path.join(workspace, ".wikiskill", "skills", candidate.targetSkill));
+    const review = await readReview(workspace, id);
+    const status = currentDigest === candidate.resultDigest && appliedDigests.get(id) === currentDigest ? "applied" : review?.verdict === "rejected" ? "rejected" : currentDigest !== candidate.baselineDigest ? "stale" : review?.verdict === "approved" ? "approved" : candidate.status;
+    items.push({ ...candidate, status, review, files: await fileMap(skillRoot) });
+  }
+  return { items, nextCursor: ids.length > Number(limit) ? ids[Number(limit) - 1] : null };
+}
+
+module.exports = { applyCandidate, diffCandidate, rollbackReceipt, proposeCandidate, reviewCandidate, listCandidates };

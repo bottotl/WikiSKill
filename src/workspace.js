@@ -129,6 +129,7 @@ async function initWorkspace(input, options = {}) {
   const fileChanges = [];
   for (const [relative, content] of Object.entries(desired)) {
     const target = path.resolve(root, relative);
+    if (Object.hasOwn(INITIAL_FILES, relative) && await exists(target)) continue;
     const before = await readText(target);
     if (before !== content) {
       const display = path.relative(workspace, target).split(path.sep).join("/");
