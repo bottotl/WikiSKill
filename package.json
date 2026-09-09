@@ -6,6 +6,7 @@
   "files": [
     "acceptance",
     "bin",
+    "docs",
     "examples",
     "fixtures",
     "skills",

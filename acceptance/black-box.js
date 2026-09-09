@@ -59,18 +59,15 @@ const main = async () => {
     const datasetPath = path.join(fixtureRoot, "dataset.json");
     const fixtureDataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
     assert.deepEqual(Object.fromEntries(["train", "val", "test"].map((split) => [split, fixtureDataset.tasks.filter((task) => task.split === split).length])), { train: 4, val: 2, test: 2 });
+    const runtimeProfilePath = path.join(root, "runtime-profile.json");
+    await fs.writeFile(runtimeProfilePath, JSON.stringify({ schema: "wikiskill.runtime-profile.v1", provider: "claude", model: "fixture-model", reasoningEffort: "low", toolProfile: "none", iterations: 2, maxProviderLaunches: 24 }));
     const events = invoke([
       "experiment", "run",
       "--workspace", workspace,
       "--target", "target-skill",
       "--dataset", datasetPath,
       "--scorer", "scorer:fixture",
-      "--provider", "claude",
-      "--model", "fixture-model",
-      "--reasoning-effort", "low",
-      "--tool-profile", "none",
-      "--iterations", "2",
-      "--max-provider-launches", "24",
+      "--runtime-profile", runtimeProfilePath,
       "--run-id", "installed-acceptance",
       "--json-events"
     ], env);

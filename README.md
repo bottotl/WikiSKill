@@ -33,6 +33,9 @@ WikiSkill 维护三层状态：
 - `Wiki`：从训练轨迹中持续整理的模式、日志和 Skill 影响记录。
 - `Skills`：当前生效的 Agent 程序知识，以及通过 validation gate 的候选。
 
+宿主平台和 domain adapter 的实现合同见
+[`docs/architecture/host-integration.md`](docs/architecture/host-integration.md)。
+
 ### 演化输入合同
 
 论文的演化算法将训练任务 `Dtrain`、验证任务 `Dval`、测试任务 `Dtest`、性能
@@ -182,11 +185,25 @@ WikiSkill 只把 `input` 和 `outputSchema` 传给 Inference Agent；ground trut
 执行：
 
 ```sh
-wikiskill experiment run --workspace . --target <skill-id> --dataset dataset.json --scorer builtin:exact-output-v1 --provider claude --model <model-id> --reasoning-effort low --tool-profile none --iterations 1 --max-provider-launches 24 --json-events
+wikiskill experiment run --workspace . --target <skill-id> --dataset dataset.json --scorer builtin:exact-output-v1 --runtime-profile runtime-profile.json --json-events
 wikiskill status --workspace . --run <run-id> --json
 ```
 
 `--iterations`、`--reasoning-effort`、`--tool-profile` 和 `--max-provider-launches` 都是冻结运行配置。K 接受正安全整数，不设 3 次的通用上限。`workspace` 允许 Inference Agent 修改独立任务工作区，`none` 不提供工具；内置 command-exit scorer 使用 `workspace`，exact-output scorer 使用 `none`。最坏情况 Provider 启动次数仅作预估，预算无需覆盖全部预估迭代；每次启动前记录并扣减实际启动次数，resume/fork 参数、配置漂移或预算耗尽会阻止该次启动。Provider 启动次数不等于模型 API 调用次数或费用。
+
+可复用的 `runtime-profile.json`：
+
+```json
+{
+  "schema": "wikiskill.runtime-profile.v1",
+  "provider": "claude",
+  "model": "<model-id>",
+  "reasoningEffort": "low",
+  "toolProfile": "none",
+  "iterations": 3,
+  "maxProviderLaunches": 100
+}
+```
 
 当前 rollout 次数是实现配置：command-exit 和外部模块路径默认每任务 1 次，内置其他运行路径采用每任务训练 2 次、评估 3 次。论文附录规定 Maintainer 每轮最多采样 5 条失败和 3 条成功轨迹，并将单条日志截断到 15,000 字符；它没有规定 Proposer 的最小读取数量。baseline validation 满分时按算法提前结束。
 
@@ -198,7 +215,7 @@ expensive rollout, use the one-shot command that prepares, evolves, and audits
 without publishing the candidate:
 
 ```sh
-wikiskill experiment run --workspace . --target <skill-id> --dataset dataset.json --scorer <scorer-ref> --provider <codex|claude> --model <model-id> --reasoning-effort <level> --tool-profile <none|workspace> --iterations <K> --max-provider-launches <count> --json-events
+wikiskill experiment run --workspace . --target <skill-id> --dataset dataset.json --scorer <scorer-ref> --runtime-profile runtime-profile.json --json-events
 ```
 
 For review-sensitive workflows, `experiment prepare`, `experiment audit`,

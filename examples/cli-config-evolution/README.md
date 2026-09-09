@@ -21,8 +21,8 @@ Run one live experiment with an available Codex model:
 npm run demo:live -- --model gpt-5.6-terra
 ```
 
-The runner uses `wikiskill experiment run` to prepare, evolve, and audit in one
-command, and preserves the emitted experiment artifact. It retains the full run under
+The runner writes a reusable runtime profile, then uses `wikiskill experiment run`
+to prepare, evolve, and audit in one command. It preserves the emitted experiment artifact and full run under
 `artifacts/<run-id>/`, and applies an accepted candidate to that artifact's
 workspace. The committed Skill remains the baseline. A live run exits nonzero
 when no candidate yields both a strict validation improvement and a positive

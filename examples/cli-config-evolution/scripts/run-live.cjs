@@ -86,18 +86,15 @@ async function main(argv = process.argv.slice(2)) {
       return summary;
     }
 
+    const runtimeProfilePath = path.join(outputRoot, "runtime-profile.json");
+    await fs.writeFile(runtimeProfilePath, `${JSON.stringify({ schema: "wikiskill.runtime-profile.v1", provider: "codex", model: options.model, reasoningEffort: "low", toolProfile: "workspace", iterations: 3, maxProviderLaunches: 100 }, null, 2)}\n`, "utf8");
     const events = invoke([
       "experiment", "run",
       "--workspace", workspace,
       "--target", targetSkill,
       "--dataset", datasetPath,
       "--scorer", "builtin:command-exit-v1",
-      "--provider", "codex",
-      "--model", options.model,
-      "--reasoning-effort", "low",
-      "--tool-profile", "workspace",
-      "--iterations", "3",
-      "--max-provider-launches", "100",
+      "--runtime-profile", runtimeProfilePath,
       "--run-id", runId,
       "--json-events"
     ], env);

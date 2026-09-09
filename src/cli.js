@@ -15,13 +15,13 @@ wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empt
 wikiskill experiment prepare --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> [--empty] --json
 wikiskill experiment audit --dataset <dataset.json> --target <skill-id> [--skill-context <context.json>] [--baseline <baseline.json>] [--mode publishable|smoke] [--empty] --json
 wikiskill experiment audit --experiment <experiment.json> --json
-wikiskill experiment run --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--empty] [--run-id <id>] --json-events
+wikiskill experiment run --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> [--runtime-profile <profile.json> | --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count>] [--empty] [--run-id <id>] --json-events
 wikiskill run audit --run-root <run-root> --workspace <workspace> --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
 wikiskill dataset verify-known-fix --dataset <dataset.json> --scorer <ref> --patch <changes.patch> --json
-wikiskill evolve --experiment <experiment.json> --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--runner-timeout-ms <ms>] [--run-id <id>] --json-events
+wikiskill evolve --experiment <experiment.json> [--runtime-profile <profile.json> | --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count>] [--runner-timeout-ms <ms>] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
 wikiskill candidate diff --workspace <workspace> --candidate <id> --json
@@ -48,6 +48,7 @@ const VALUE_FLAGS = Object.freeze({
   "--input": "input",
   "--dataset": "datasetPath",
   "--experiment": "experimentPath",
+  "--runtime-profile": "runtimeProfilePath",
   "--skill-context": "skillContextPath",
   "--baseline": "baselinePath",
   "--run-root": "runRoot",
@@ -143,6 +144,26 @@ const readExperiment = async (input) => {
   return { experimentPath, experiment };
 };
 
+const applyRuntimeProfile = async (options) => {
+  if (!options.runtimeProfilePath) return options;
+  if (options.command !== "evolve" && !(options.command === "experiment" && options.subcommand === "run")) throw new Error("--runtime-profile is supported only by evolve and experiment run.");
+  const explicit = ["provider", "modelId", "reasoningEffort", "toolProfile", "iterationLimit", "maxProviderLaunches", "runnerTimeoutMs"].filter((key) => options[key] !== undefined);
+  if (explicit.length) throw new Error("--runtime-profile cannot be combined with explicit runtime flags.");
+  const profile = JSON.parse(await fs.readFile(path.resolve(options.runtimeProfilePath), "utf8"));
+  const allowed = new Set(["schema", "provider", "model", "reasoningEffort", "toolProfile", "iterations", "maxProviderLaunches", "runnerTimeoutMs"]);
+  if (profile?.schema !== "wikiskill.runtime-profile.v1" || Object.keys(profile).some((key) => !allowed.has(key))) throw new Error("Runtime profile must use wikiskill.runtime-profile.v1 with only supported fields.");
+  for (const key of ["provider", "model", "reasoningEffort", "toolProfile", "iterations", "maxProviderLaunches"]) if (profile[key] === undefined) throw new Error(`Runtime profile requires ${key}.`);
+  return Object.assign(options, {
+    provider: profile.provider,
+    modelId: profile.model,
+    reasoningEffort: profile.reasoningEffort,
+    toolProfile: profile.toolProfile,
+    iterationLimit: String(profile.iterations),
+    maxProviderLaunches: String(profile.maxProviderLaunches),
+    ...(profile.runnerTimeoutMs === undefined ? {} : { runnerTimeoutMs: String(profile.runnerTimeoutMs) })
+  });
+};
+
 const applyExperiment = (options, experiment) => Object.assign(options, {
   workspace: experiment.workspace,
   target: experiment.targetSkill,
@@ -188,6 +209,7 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       return argv.length ? 0 : 1;
     }
     const options = parse(argv);
+    await applyRuntimeProfile(options);
     if (options.command === "evolve" && options.experimentPath) {
       const conflicts = ["workspace", "target", "datasetPath", "scorerRef", "expectedWorkspaceId", "expectedDatasetDigest", "expectedTargetSkillDigest", "expectedActiveSkillSetDigest", "expectedWikiDigest"].filter((key) => options[key] !== undefined);
       if (conflicts.length) throw new Error("evolve --experiment cannot be combined with explicit experiment authority flags.");

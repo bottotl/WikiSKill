@@ -23,11 +23,12 @@ test("bundled evolution Skill ships its routed references without executable aud
   const root = path.join(__dirname, "..", "skills", "wikiskill-evolution");
   for (const relative of [
     "SKILL.md",
-    "references/evolution-guidelines.md",
-    "references/host-integration.md"
+    "references/evolution-guidelines.md"
   ]) assert.equal(fs.statSync(path.join(root, relative)).isFile(), true, relative);
+  assert.equal(fs.statSync(path.join(__dirname, "..", "docs", "architecture", "host-integration.md")).isFile(), true);
   const manifest = require("../package.json");
   assert.equal(manifest.files.includes("skills"), true);
+  assert.equal(manifest.files.includes("docs"), true);
 });
 
 test("experiment audit accepts a structurally valid smoke and reports sample-size warnings", () => {
@@ -110,6 +111,20 @@ test("official experiment audit CLI exposes the Meta-Skill audit", () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.success, true);
   assert.equal(output.data.schema, "wikiskill.experiment-audit.v1");
+});
+
+test("runtime profile rejects incomplete or ambiguous runtime selection", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-runtime-profile-"));
+  const profilePath = path.join(root, "profile.json");
+  fs.writeFileSync(profilePath, JSON.stringify({ schema: "wikiskill.runtime-profile.v1", provider: "claude", model: "model-1", reasoningEffort: "low", toolProfile: "none", iterations: 1 }));
+  const incomplete = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "wikiskill"), "experiment", "run", "--runtime-profile", profilePath, "--json-events"], { encoding: "utf8" });
+  assert.equal(incomplete.status, 1);
+  assert.match(JSON.parse(incomplete.stdout).blockers[0], /maxProviderLaunches/u);
+
+  fs.writeFileSync(profilePath, JSON.stringify({ schema: "wikiskill.runtime-profile.v1", provider: "claude", model: "model-1", reasoningEffort: "low", toolProfile: "none", iterations: 1, maxProviderLaunches: 10 }));
+  const ambiguous = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "wikiskill"), "experiment", "run", "--runtime-profile", profilePath, "--provider", "claude", "--json-events"], { encoding: "utf8" });
+  assert.equal(ambiguous.status, 1);
+  assert.match(JSON.parse(ambiguous.stdout).blockers[0], /cannot be combined/u);
 });
 
 test("publishable audit requires and validates the complete active Skill context", () => {

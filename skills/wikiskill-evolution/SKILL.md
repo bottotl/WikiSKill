@@ -30,17 +30,12 @@ Use this flow only for Skill evolution or paper reproduction:
      --dataset <dataset.json> \
      --target <skill-id> \
      --scorer <scorer-ref> \
-     --provider <codex|claude> \
-     --model <model-id> \
-     --reasoning-effort <level> \
-     --tool-profile <none|workspace> \
-     --iterations <K> \
-     --max-provider-launches <count> \
+     --runtime-profile <profile.json> \
      [--empty] \
      --json-events
    ```
 
-   Resolve blockers and review sample-size warnings. Task semantics, write scope, and split provenance require human or source-level review.
+   Resolve blockers and review sample-size warnings. Task semantics, write scope, and split provenance require human or source-level review. For a one-off run, the profile fields may be supplied as explicit CLI flags instead.
 3. When preparation and execution require separate review, use `wikiskill experiment prepare ... > experiment.json`, optionally recheck it with `wikiskill experiment audit --experiment experiment.json`, then run `wikiskill evolve --experiment experiment.json ...` followed by:
 
    ```sh
@@ -57,7 +52,7 @@ Use this flow only for Skill evolution or paper reproduction:
 - Freeze and report the complete active Skill inventory, per-Skill digests, and combined bundle digest. The target Skill digest alone is insufficient.
 - Give each Inference Agent only its current task, active Skills, tools, and output contract; hide ground truth, private scorer data, reference patches, other tasks, candidate decisions, and the evolution Wiki. Keep validation/test trajectories out of the Maintainer and Proposer contexts.
 - Do not change the dataset, scorer, model, baseline, or budget after observing a candidate score. Prepare a new auditable experiment instead.
-- A host platform may bind workspaces and launch runs, but it must not redefine WikiSkill roles or acceptance rules. Read [host-integration.md](references/host-integration.md) when integrating a host or domain adapter.
+- When implementing a host or domain adapter, follow the repository's [host integration architecture](../../docs/architecture/host-integration.md).
 - The paper initializes `S0` and `W0` as empty. WikiSkill's seeded-target mode is a production extension; use `--empty` with an empty Wiki for reproduction claims, and label seeded experiments explicitly.
 
 ## Completion

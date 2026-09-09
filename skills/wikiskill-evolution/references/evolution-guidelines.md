@@ -83,6 +83,22 @@ Record and verify:
 
 Any drift requires a new preparation step. Do not update an in-flight experiment to match an observed result. `experiment prepare` records the dataset, context, and baseline in one artifact; `evolve --experiment` checks those frozen values again when it creates the run snapshot.
 
+Reuse runtime choices independently of experiment inputs:
+
+```json
+{
+  "schema": "wikiskill.runtime-profile.v1",
+  "provider": "claude",
+  "model": "<model-id>",
+  "reasoningEffort": "low",
+  "toolProfile": "none",
+  "iterations": 3,
+  "maxProviderLaunches": 100
+}
+```
+
+Use `toolProfile: "workspace"` for command-scored coding tasks. Keep scorer identity in the experiment command because it defines the dataset contract, not the runtime profile.
+
 The paper starts from `(S0, W0) = (empty, empty)`. Seeded evolution of an existing Skill is a useful product extension, but it is not the paper's reported experimental setup. Use an actual empty Skill and Wiki authority for reproduction claims.
 
 ## Scoring
