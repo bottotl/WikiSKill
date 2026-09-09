@@ -26,20 +26,16 @@ const sha256 = (value) => `sha256:${crypto.createHash("sha256").update(value).di
 
 const inspectTree = (root) => {
   const files = [];
-  let writable = false;
   const visit = (directory) => {
     const directoryStat = fs.lstatSync(directory);
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error(`Raw authority contains an invalid directory: ${directory}`);
-    if ((directoryStat.mode & 0o222) !== 0) writable = true;
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
       const stat = fs.lstatSync(target);
       if (stat.isSymbolicLink()) throw new Error(`Raw authority contains a symlink: ${target}`);
       if (stat.isDirectory()) visit(target);
-      else if (stat.isFile()) {
-        if ((stat.mode & 0o222) !== 0) writable = true;
-        files.push(target);
-      } else throw new Error(`Raw authority contains an unsupported entry: ${target}`);
+      else if (stat.isFile()) files.push(target);
+      else throw new Error(`Raw authority contains an unsupported entry: ${target}`);
     }
   };
   visit(root);
@@ -49,7 +45,7 @@ const inspectTree = (root) => {
     chunks.push(fs.readFileSync(file));
     chunks.push(Buffer.from("\0"));
   }
-  return { digest: sha256(Buffer.concat(chunks)), writable };
+  return { digest: sha256(Buffer.concat(chunks)) };
 };
 
 const visitJson = (root) => {
@@ -86,7 +82,6 @@ const auditRun = (runRoot, { workspace } = {}) => {
         const runtime = inspectTree(path.join(runRoot, "raw"));
         if (authorityManifest.schema !== "wikiskill.evolution-raw.v1" || authorityManifest.runId !== manifest.runId || authorityManifest.rawDigest !== authority.digest) blockers.push("Persisted Raw authority manifest is invalid.");
         if (authority.digest !== runtime.digest) blockers.push("Persisted Raw authority differs from the terminal run evidence.");
-        if (inspectTree(authorityRoot).writable) blockers.push("Persisted Raw authority is writable instead of sealed read-only.");
       } catch (error) {
         blockers.push(`Persisted Raw authority cannot be verified: ${error instanceof Error ? error.message : String(error)}`);
       }

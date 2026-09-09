@@ -194,18 +194,20 @@ expensive rollout, run its zero-dependency preflight alongside the canonical
 dataset validator:
 
 ```sh
+wikiskill dataset validate --dataset dataset.json --scorer <scorer-ref> --json
 wikiskill context prepare --workspace . --json > skill-context.json
 wikiskill evolution baseline --workspace . --target <skill-id> --json > baseline.json
-node skills/wikiskill-evolution/scripts/audit-experiment.js --dataset dataset.json --target-skill <skill-id> --scorer <scorer-ref> --skill-context skill-context.json --baseline baseline.json --mode publishable --json
-wikiskill dataset validate --dataset dataset.json --scorer <scorer-ref> --json
+node skills/wikiskill-evolution/scripts/audit-experiment.js --dataset dataset.json --target-skill <skill-id> --skill-context skill-context.json --baseline baseline.json --mode publishable --json
 ```
 
-Publishable preflight blocks Inference meta-tasks, target-Skill writes, missing
-lineage, split leakage, scorer drift, and missing active-Skill context. Use
-`--mode smoke` only for non-publishing harness diagnosis. Semantic
-task/fixture/scorer alignment still requires domain review. Audit a completed
-run with `scripts/audit-run.js --run-root <run-root> --workspace <workspace>`
-before candidate publication.
+The canonical validator owns dataset structure and scorer consistency. The
+experiment audit blocks frozen-context conflicts and declared cross-split
+lineage reuse; possible meta-tasks, missing lineage, suspicious write paths, and
+small splits are review warnings. Use `--mode smoke` only for non-publishing
+harness diagnosis. Semantic task/fixture/scorer alignment still requires domain
+review. Audit a completed run with
+`scripts/audit-run.js --run-root <run-root> --workspace <workspace>` before
+candidate publication.
 
 使用 `--empty` 可以从空的 active S0 创建第一个 Skill；若要复现论文的空 W0，需从新初始化且尚未积累模式的 Wiki 开始。
 上层产品必须先执行 `dataset validate` 和 `evolution baseline`，再把返回的 workspace、

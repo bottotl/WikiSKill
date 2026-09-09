@@ -23,9 +23,7 @@ test("bundled evolution Skill ships every routed resource", () => {
   const root = path.join(__dirname, "..", "skills", "wikiskill-evolution");
   for (const relative of [
     "SKILL.md",
-    "references/experiment-design.md",
-    "references/dataset-and-splits.md",
-    "references/gating-and-publication.md",
+    "references/evolution-guidelines.md",
     "references/host-integration.md",
     "scripts/audit-experiment.js",
     "scripts/audit-run.js"
@@ -45,7 +43,6 @@ test("experiment audit accepts a structurally valid smoke and reports sample-siz
       ]
     },
     targetSkill: "repo-validation",
-    scorer: "builtin:exact-output-v1",
     mode: "smoke"
   });
   assert.deepEqual(result.blockers, []);
@@ -53,43 +50,36 @@ test("experiment audit accepts a structurally valid smoke and reports sample-siz
   assert.equal(result.warnings.filter((warning) => /only one/u.test(warning)).length, 3);
 });
 
-test("experiment audit blocks invalid splits and scorer drift while surfacing meta-task scope", () => {
+test("experiment audit reports semantic heuristics as review warnings", () => {
+  const train = exactTask("train-1", "train", "Optimize the repo-validation Skill and update its runner.");
+  delete train.lineageKey;
+  train.groundTruth.allowedPaths = [
+    "skills/repo-validation/SKILL.md",
+    "skills/repo-validation/runner.js",
+    "skills/repo-validation/runner.test.js",
+    "contract.md",
+    "reference.md",
+    "workflow.md",
+    "adapter.js",
+    "adapter.test.js",
+    "README.md"
+  ];
   const result = audit({
     dataset: {
       schema: "wikiskill.dataset.v1",
       tasks: [
-        {
-          id: "train-1",
-          split: "train",
-          input: { instruction: "Optimize the repo-validation Skill and update its runner." },
-          groundTruth: {
-            schema: "wikiskill.scorer.command-exit.v1",
-            command: ["node", "--test", "runner.test.js"],
-            allowedPaths: [
-              "skills/repo-validation/SKILL.md",
-              "skills/repo-validation/runner.js",
-              "skills/repo-validation/runner.test.js",
-              "contract.md",
-              "reference.md",
-              "workflow.md",
-              "adapter.js",
-              "adapter.test.js",
-              "README.md"
-            ]
-          },
-          evaluator: { capabilityRef: "wrong-scorer" }
-        },
-        exactTask("val-1", "val", "Perform domain validation.")
+        train,
+        exactTask("val-1", "val", "Perform domain validation."),
+        exactTask("test-1", "test", "Perform held-out validation.")
       ]
     },
     targetSkill: "repo-validation",
-    scorer: "builtin:command-exit-v1",
-    mode: "publishable"
+    mode: "smoke"
   });
-  assert.equal(result.blockers.some((blocker) => /evaluator capability/u.test(blocker)), true);
-  assert.equal(result.blockers.some((blocker) => /at least one test task/u.test(blocker)), true);
-  assert.equal(result.blockers.some((blocker) => /optimize a Skill/u.test(blocker)), true);
-  assert.equal(result.blockers.some((blocker) => /expose the target Skill/u.test(blocker)), true);
+  assert.deepEqual(result.blockers, []);
+  assert.equal(result.warnings.some((warning) => /optimize a Skill/u.test(warning)), true);
+  assert.equal(result.warnings.some((warning) => /expose the target Skill/u.test(warning)), true);
+  assert.equal(result.warnings.some((warning) => /no lineageKey/u.test(warning)), true);
   assert.equal(result.warnings.some((warning) => /contains 9 entries/u.test(warning)), true);
 });
 
@@ -101,7 +91,6 @@ test("experiment audit CLI returns a stable nonzero blocker envelope", () => {
     path.join(__dirname, "..", "skills", "wikiskill-evolution", "scripts", "audit-experiment.js"),
     "--dataset", datasetPath,
     "--target-skill", "repo-validation",
-    "--scorer", "builtin:exact-output-v1",
     "--mode", "smoke",
     "--json"
   ], { encoding: "utf8" });
@@ -109,7 +98,7 @@ test("experiment audit CLI returns a stable nonzero blocker envelope", () => {
   const output = JSON.parse(result.stdout);
   assert.equal(output.schema, "wikiskill.experiment-audit.v1");
   assert.equal(output.success, false);
-  assert.equal(output.blockers.length, 3);
+  assert.equal(output.blockers.length, 4);
 });
 
 test("publishable audit requires and validates the complete active Skill context", () => {
@@ -130,7 +119,6 @@ test("publishable audit requires and validates the complete active Skill context
       ]
     },
     targetSkill: "repo-validation",
-    scorer: "builtin:exact-output-v1",
     mode: "publishable",
     skillContext: {
       workspaceId,
@@ -219,15 +207,6 @@ test("terminal run audit verifies immutable Raw, strict gating, final-only test,
   fs.mkdirSync(authorityRoot, { recursive: true });
   fs.cpSync(path.join(root, "raw"), path.join(authorityRoot, "raw"), { recursive: true });
   fs.writeFileSync(path.join(authorityRoot, "manifest.json"), JSON.stringify({ schema: "wikiskill.evolution-raw.v1", runId: "run-1", rawDigest: inspectTree(path.join(authorityRoot, "raw")).digest }));
-  const seal = (target) => {
-    const stat = fs.lstatSync(target);
-    if (stat.isDirectory()) {
-      for (const entry of fs.readdirSync(target)) seal(path.join(target, entry));
-      fs.chmodSync(target, 0o555);
-    } else fs.chmodSync(target, 0o444);
-  };
-  seal(authorityRoot);
-
   const result = auditRun(root, { workspace });
   assert.deepEqual(result.blockers, []);
   assert.equal(result.data.activeSkillSetDigest, activeSkillSetDigest);

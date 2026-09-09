@@ -15,8 +15,8 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
 
 ## Required Flow
 
-1. Read [experiment-design.md](references/experiment-design.md) and define real domain tasks for the Inference Agent. The task must ask the Agent to do the work, not to optimize the Skill.
-2. Read [dataset-and-splits.md](references/dataset-and-splits.md). Make task text, fixtures, scorer expectations, allowed write paths, and terminology agree exactly. Keep train, validation, and test disjoint.
+1. Read [evolution-guidelines.md](references/evolution-guidelines.md). Define real domain tasks for the Inference Agent and align task text, fixtures, scorer expectations, and write scope. The task must ask the Agent to do the work, not to optimize the Skill.
+2. Run `wikiskill dataset validate --dataset <dataset.json> --scorer <scorer-ref> --json`. Treat this command as the canonical dataset structure and scorer-contract validator.
 3. Freeze the complete active Skill set with `wikiskill context prepare --workspace <workspace> --json > <skill-context.json>`, then freeze the evolution authority with `wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empty] --json > <baseline.json>`. The two outputs must describe the same workspace and active Skill-set digest. An empty baseline requires an empty active context.
 4. Run the preflight audit before any Provider rollout:
 
@@ -24,16 +24,15 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
    node skills/wikiskill-evolution/scripts/audit-experiment.js \
      --dataset <dataset.json> \
      --target-skill <skill-id> \
-     --scorer <scorer-ref> \
      --skill-context <skill-context.json> \
      --baseline <baseline.json> \
      --mode publishable \
      --json
    ```
 
-   Resolve every blocker. Review warnings explicitly; do not suppress a warning merely to start the run.
+   Resolve contract blockers. Review semantic warnings, including possible meta-tasks, missing provenance, or suspicious write scope; these require judgment rather than keyword-based rejection.
    Use `--mode smoke` only for harness diagnosis. Smoke warnings may be reviewed, but a smoke run must never publish a candidate.
-5. Run `wikiskill dataset validate`. A known-fix RED-to-GREEN check is optional diagnostic evidence, not an evolution prerequisite, and its patch must remain hidden from Inference Agents.
+5. A known-fix RED-to-GREEN check is optional diagnostic evidence, not an evolution prerequisite, and its patch must remain hidden from Inference Agents.
 6. Start `wikiskill evolve` with the prepared workspace, dataset, target Skill, complete active Skill-set, and Wiki digests plus explicit Provider, model, reasoning effort, scorer, tool profile, iteration count, launch budget, and run id. Pass `--expected-active-skill-set-digest <baseline-active-skill-set-digest>` in addition to the target and Wiki digests. Use `--runner-timeout-ms` only when the task duration justifies a frozen non-default timeout.
 7. Audit the terminal run before interpretation or publication:
 
@@ -41,7 +40,7 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
    node skills/wikiskill-evolution/scripts/audit-run.js --run-root <run-root> --workspace <workspace> --json
    ```
 
-8. Read [gating-and-publication.md](references/gating-and-publication.md). Strict validation gain is required. `no_action`, rejection, and Wiki-only growth are valid outcomes.
+8. Interpret and publish the result using [evolution-guidelines.md](references/evolution-guidelines.md). Strict validation gain is required. `no_action`, rejection, and Wiki-only growth are valid outcomes.
 
 ## Boundaries
 

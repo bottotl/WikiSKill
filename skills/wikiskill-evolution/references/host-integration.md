@@ -29,7 +29,7 @@ Hosts and adapters must not copy or redefine the generic evolution method. Distr
 - Keep task workspaces independent and clean them after Raw evidence is durable.
 - Expose `no_action`, rejection, Wiki-only growth, candidate creation, publication, and rollback as different states.
 - Do not treat a successful query or Mission status call as evidence that evolution improved a Skill.
-- Persist Raw trajectories under the workspace's immutable evolution authority and verify its digest and read-only seal against the terminal run.
+- Persist Raw trajectories under the workspace's immutable evolution authority and verify its content digest against the terminal run.
 - Produce terminal run evidence showing that Proposer trace reads resolve only to the matching iteration and attempt's training trajectories and test launches occur only in the final evaluation phase.
 
 ## Required Domain Behavior
