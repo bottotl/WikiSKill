@@ -8,12 +8,11 @@ const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
 const { audit } = require("../skills/wikiskill-evolution/scripts/audit-experiment");
-const { auditRun, inspectTree } = require("../skills/wikiskill-evolution/scripts/audit-run");
+const { auditRun } = require("../skills/wikiskill-evolution/scripts/audit-run");
 
 const exactTask = (id, split, instruction) => ({
   id,
   split,
-  lineageKey: `lineage-${id}`,
   input: { instruction },
   groundTruth: { schema: "wikiskill.scorer.exact-output.v1", expected: { value: id } },
   evaluator: { capabilityRef: "builtin:exact-output-v1" }
@@ -50,9 +49,8 @@ test("experiment audit accepts a structurally valid smoke and reports sample-siz
   assert.equal(result.warnings.filter((warning) => /only one/u.test(warning)).length, 3);
 });
 
-test("experiment audit reports semantic heuristics as review warnings", () => {
-  const train = exactTask("train-1", "train", "Optimize the repo-validation Skill and update its runner.");
-  delete train.lineageKey;
+test("experiment audit reports suspicious write scope as review warnings", () => {
+  const train = exactTask("train-1", "train", "Perform domain validation.");
   train.groundTruth.allowedPaths = [
     "skills/repo-validation/SKILL.md",
     "skills/repo-validation/runner.js",
@@ -77,9 +75,7 @@ test("experiment audit reports semantic heuristics as review warnings", () => {
     mode: "smoke"
   });
   assert.deepEqual(result.blockers, []);
-  assert.equal(result.warnings.some((warning) => /optimize a Skill/u.test(warning)), true);
   assert.equal(result.warnings.some((warning) => /expose the target Skill/u.test(warning)), true);
-  assert.equal(result.warnings.some((warning) => /no lineageKey/u.test(warning)), true);
   assert.equal(result.warnings.some((warning) => /contains 9 entries/u.test(warning)), true);
 });
 
@@ -140,11 +136,12 @@ test("publishable audit requires and validates the complete active Skill context
   assert.deepEqual(result.blockers, []);
 });
 
-test("terminal run audit verifies immutable Raw, strict gating, final-only test, and training-only proposal reads", () => {
+test("terminal run audit verifies the Raw receipt, strict gating, final-only test, and training-only proposal reads", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-run-audit-"));
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-run-audit-workspace-"));
   fs.mkdirSync(path.join(root, "runs", "proposals"), { recursive: true });
   fs.mkdirSync(path.join(root, "tasks"));
+  fs.mkdirSync(path.join(root, "result"));
   fs.mkdirSync(path.join(root, "raw", "traces", "iter-01", "train"), { recursive: true });
   fs.mkdirSync(path.join(root, "raw", "traces", "iter-01-candidate", "val"), { recursive: true });
   fs.mkdirSync(path.join(root, "raw", "traces", "final-baseline", "test"), { recursive: true });
@@ -205,10 +202,13 @@ test("terminal run audit verifies immutable Raw, strict gating, final-only test,
 
   const authorityRoot = path.join(workspace, ".wikiskill", "raw", "evolutions", "run-1");
   fs.mkdirSync(authorityRoot, { recursive: true });
-  fs.cpSync(path.join(root, "raw"), path.join(authorityRoot, "raw"), { recursive: true });
-  fs.writeFileSync(path.join(authorityRoot, "manifest.json"), JSON.stringify({ schema: "wikiskill.evolution-raw.v1", runId: "run-1", rawDigest: inspectTree(path.join(authorityRoot, "raw")).digest }));
+  const rawDigest = `sha256:${"e".repeat(64)}`;
+  fs.writeFileSync(path.join(authorityRoot, "manifest.json"), JSON.stringify({ schema: "wikiskill.evolution-raw.v1", runId: "run-1", rawDigest }));
+  fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest }));
   const result = auditRun(root, { workspace });
   assert.deepEqual(result.blockers, []);
   assert.equal(result.data.activeSkillSetDigest, activeSkillSetDigest);
   assert.equal(result.data.activeSkills.length, 2);
+  fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest: `sha256:${"f".repeat(64)}` }));
+  assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /receipt does not match/u.test(blocker)), true);
 });

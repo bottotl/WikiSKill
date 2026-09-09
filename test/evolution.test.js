@@ -112,11 +112,13 @@ test("explicit dataset runs the paper loop and stages a strict-gain candidate", 
   assert.equal(result.state.baselineTestScore, 0);
   assert.equal(result.state.testScore, 1);
   assert.equal(result.state.testGain, 1);
+  assert.match(result.rawDigest, /^sha256:[0-9a-f]{64}$/u);
   assert.deepEqual(result.state.acceptedIterations, [1]);
   assert.equal(result.candidate.status, "validation_accepted");
   assert.equal(await fs.readFile(path.join(skillRoot, "SKILL.md"), "utf8"), before);
   assert.match(await fs.readFile(path.join(workspace, ".wikiskill/wiki/patterns/procedure.md"), "utf8"), /old procedure fails/u);
   assert.equal(await fs.access(path.join(workspace, result.rawRef, "raw", "traces")).then(() => true), true);
+  assert.equal(JSON.parse(await fs.readFile(path.join(result.runRoot, "result", "raw-authority.json"), "utf8")).rawDigest, result.rawDigest);
 });
 
 

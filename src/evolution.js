@@ -46,13 +46,13 @@ const copyTree = async (source, destination) => {
 };
 
 const treeDigest = async (root) => {
-  const chunks = [];
+  const hash = crypto.createHash("sha256");
   for (const file of await sortedFiles(root)) {
-    chunks.push(Buffer.from(`${path.relative(root, file).split(path.sep).join("/")}\0`));
-    chunks.push(await fs.readFile(file));
-    chunks.push(Buffer.from("\0"));
+    hash.update(`${path.relative(root, file).split(path.sep).join("/")}\0`);
+    hash.update(await fs.readFile(file));
+    hash.update("\0");
   }
-  return digest(Buffer.concat(chunks));
+  return `sha256:${hash.digest("hex")}`;
 };
 
 const sealReadOnly = async (target) => {
@@ -122,11 +122,16 @@ const persistEvolutionRaw = async (workspace, runRoot, runId) => {
   const finalRoot = path.join(rawAuthority, runId);
   if (await exists(finalRoot)) throw new Error(`Evolution Raw already exists and is immutable: ${runId}`);
   const staging = path.join(rawAuthority, `.staging-${crypto.randomUUID()}`);
-  await copyTree(path.join(runRoot, "raw"), path.join(staging, "raw"));
-  await fs.writeFile(path.join(staging, "manifest.json"), json({ schema: "wikiskill.evolution-raw.v1", runId, rawDigest: await treeDigest(path.join(staging, "raw")) }), { flag: "wx" });
+  const runtimeRaw = path.join(runRoot, "raw");
+  await copyTree(runtimeRaw, path.join(staging, "raw"));
+  const rawDigest = await treeDigest(path.join(staging, "raw"));
+  await fs.writeFile(path.join(staging, "manifest.json"), json({ schema: "wikiskill.evolution-raw.v1", runId, rawDigest }), { flag: "wx" });
   await fs.rename(staging, finalRoot);
   await sealReadOnly(finalRoot);
-  return `.wikiskill/raw/evolutions/${runId}`;
+  const receipt = { schema: "wikiskill.raw-authority-receipt.v1", runId, rawRef: `.wikiskill/raw/evolutions/${runId}`, rawDigest };
+  await fs.mkdir(path.join(runRoot, "result"), { recursive: true });
+  await fs.writeFile(path.join(runRoot, "result", "raw-authority.json"), json(receipt), { flag: "wx" });
+  return receipt;
 };
 
 const syncPersistentWiki = async (workspace, runRoot, baselineDigest) => {
@@ -518,12 +523,12 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   } catch (error) {
     runError = error;
   }
-  const rawRef = await persistEvolutionRaw(workspace, manifest.runRoot, runId);
+  const raw = await persistEvolutionRaw(workspace, manifest.runRoot, runId);
   const wiki = await syncPersistentWiki(workspace, manifest.runRoot, baselineWikiDigest);
   if (runError) throw runError;
   const candidate = await stageCandidate(workspace, manifest.runRoot, targetSkill, baselineSkillDigest, completed.state);
   options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.completed", runId, candidateId: candidate?.candidateId ?? null });
-  return { runId, runRoot: manifest.runRoot, datasetId: selection.datasetId, rawRef, wiki, candidate, state: completed.state, launchBudget: launchBudget.snapshot(), runtimeEvidenceDigest: completed.runtimeEvidenceDigest };
+  return { runId, runRoot: manifest.runRoot, datasetId: selection.datasetId, rawRef: raw.rawRef, rawDigest: raw.rawDigest, wiki, candidate, state: completed.state, launchBudget: launchBudget.snapshot(), runtimeEvidenceDigest: completed.runtimeEvidenceDigest };
 }
 
 async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {

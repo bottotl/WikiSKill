@@ -37,7 +37,7 @@ Each task must have an observable result that a domain scorer can judge without 
 
 Use distinct task instances across splits. Renaming a fixture or changing an incidental string does not make it independent. A dataset derived from one commit is useful as a harness smoke, but it is weak evidence of generalization unless it yields genuinely different held-out tasks.
 
-When source provenance is available, add a stable `lineageKey` for the originating task or episode. The audit blocks a declared lineage that crosses splits and warns when lineage is absent; absence requires human or source-level evidence rather than failing an otherwise valid canonical dataset.
+Verify split independence from the dataset source and record that evidence with the experiment. A host that derives several tasks from one issue, commit, or episode may add its own provenance metadata and checks without changing the generic WikiSkill dataset contract.
 
 Prefer several real episodes representing both success and failure. With a small validation set, repeat the whole frozen experiment when the decision matters; never reuse test feedback to tune the candidate.
 

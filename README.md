@@ -201,11 +201,10 @@ node skills/wikiskill-evolution/scripts/audit-experiment.js --dataset dataset.js
 ```
 
 The canonical validator owns dataset structure and scorer consistency. The
-experiment audit blocks frozen-context conflicts and declared cross-split
-lineage reuse; possible meta-tasks, missing lineage, suspicious write paths, and
-small splits are review warnings. Use `--mode smoke` only for non-publishing
-harness diagnosis. Semantic task/fixture/scorer alignment still requires domain
-review. Audit a completed run with
+experiment audit blocks frozen-context conflicts and reports suspicious write
+paths and small splits as review warnings. Task semantics, split provenance,
+and task/fixture/scorer alignment still require domain review. Use `--mode
+smoke` only for non-publishing harness diagnosis. Audit a completed run with
 `scripts/audit-run.js --run-root <run-root> --workspace <workspace>` before
 candidate publication.
 

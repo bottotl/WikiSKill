@@ -30,7 +30,7 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
      --json
    ```
 
-   Resolve contract blockers. Review semantic warnings, including possible meta-tasks, missing provenance, or suspicious write scope; these require judgment rather than keyword-based rejection.
+   Resolve contract blockers. Review suspicious write-scope and sample-size warnings; task semantics and split provenance require human or source-level review rather than keyword-based rejection.
    Use `--mode smoke` only for harness diagnosis. Smoke warnings may be reviewed, but a smoke run must never publish a candidate.
 5. A known-fix RED-to-GREEN check is optional diagnostic evidence, not an evolution prerequisite, and its patch must remain hidden from Inference Agents.
 6. Start `wikiskill evolve` with the prepared workspace, dataset, target Skill, complete active Skill-set, and Wiki digests plus explicit Provider, model, reasoning effort, scorer, tool profile, iteration count, launch budget, and run id. Pass `--expected-active-skill-set-digest <baseline-active-skill-set-digest>` in addition to the target and Wiki digests. Use `--runner-timeout-ms` only when the task duration justifies a frozen non-default timeout.
@@ -55,4 +55,4 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
 
 ## Completion
 
-Report the frozen active Skill bundle, inputs, split lineage, Provider launches, baseline and candidate validation scores, final test score, Wiki changes, candidate state, run-audit result, and publication receipt when one exists. Never describe `completed` alone as Skill improvement.
+Report the frozen active Skill bundle, inputs, split-independence evidence, Provider launches, baseline and candidate validation scores, final test score, Wiki changes, candidate state, run-audit result, and publication receipt when one exists. Never describe `completed` alone as Skill improvement.

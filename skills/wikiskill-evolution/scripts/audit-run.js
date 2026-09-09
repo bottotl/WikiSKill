@@ -24,30 +24,6 @@ const parseArgs = (argv) => {
 const readJson = (target) => JSON.parse(fs.readFileSync(target, "utf8"));
 const sha256 = (value) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
 
-const inspectTree = (root) => {
-  const files = [];
-  const visit = (directory) => {
-    const directoryStat = fs.lstatSync(directory);
-    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new Error(`Raw authority contains an invalid directory: ${directory}`);
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const target = path.join(directory, entry.name);
-      const stat = fs.lstatSync(target);
-      if (stat.isSymbolicLink()) throw new Error(`Raw authority contains a symlink: ${target}`);
-      if (stat.isDirectory()) visit(target);
-      else if (stat.isFile()) files.push(target);
-      else throw new Error(`Raw authority contains an unsupported entry: ${target}`);
-    }
-  };
-  visit(root);
-  const chunks = [];
-  for (const file of files.sort()) {
-    chunks.push(Buffer.from(`${path.relative(root, file).split(path.sep).join("/")}\0`));
-    chunks.push(fs.readFileSync(file));
-    chunks.push(Buffer.from("\0"));
-  }
-  return { digest: sha256(Buffer.concat(chunks)) };
-};
-
 const visitJson = (root) => {
   const files = [];
   const visit = (directory) => {
@@ -78,10 +54,9 @@ const auditRun = (runRoot, { workspace } = {}) => {
       const authorityRoot = path.join(path.resolve(workspace), expectedRawRef);
       try {
         const authorityManifest = readJson(path.join(authorityRoot, "manifest.json"));
-        const authority = inspectTree(path.join(authorityRoot, "raw"));
-        const runtime = inspectTree(path.join(runRoot, "raw"));
-        if (authorityManifest.schema !== "wikiskill.evolution-raw.v1" || authorityManifest.runId !== manifest.runId || authorityManifest.rawDigest !== authority.digest) blockers.push("Persisted Raw authority manifest is invalid.");
-        if (authority.digest !== runtime.digest) blockers.push("Persisted Raw authority differs from the terminal run evidence.");
+        const receipt = readJson(path.join(runRoot, "result", "raw-authority.json"));
+        if (authorityManifest.schema !== "wikiskill.evolution-raw.v1" || authorityManifest.runId !== manifest.runId || !SHA256.test(authorityManifest.rawDigest || "")) blockers.push("Persisted Raw authority manifest is invalid.");
+        if (receipt.schema !== "wikiskill.raw-authority-receipt.v1" || receipt.runId !== manifest.runId || receipt.rawRef !== expectedRawRef || receipt.rawDigest !== authorityManifest.rawDigest) blockers.push("Terminal Raw authority receipt does not match its manifest.");
       } catch (error) {
         blockers.push(`Persisted Raw authority cannot be verified: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -179,4 +154,4 @@ const main = () => {
 
 if (require.main === module) main();
 
-module.exports = { auditRun, inspectTree, parseArgs };
+module.exports = { auditRun, parseArgs };

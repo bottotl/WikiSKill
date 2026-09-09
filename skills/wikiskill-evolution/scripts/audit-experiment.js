@@ -8,7 +8,6 @@ const { skillSetDigest } = require("../../../src/skill-bundle");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/u;
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
-const META_TASK = /(?:\b(?:optimi[sz]e|improve|modify|update|evolve)\b.{0,80}\bskill\b|\bskill\b.{0,80}\b(?:optimi[sz]e|improve|modify|update|evolve)\b|(?:优化|修改|更新|演化).{0,40}(?:Skill|技能))/iu;
 
 const parseArgs = (argv) => {
   const options = { json: false, mode: "publishable", empty: false };
@@ -28,13 +27,6 @@ const parseArgs = (argv) => {
   if (!new Set(["publishable", "smoke"]).has(options.mode)) throw new Error("--mode must be publishable or smoke");
   if (options.mode === "publishable" && (!options.skillContext || !options.baseline)) throw new Error("--skill-context and --baseline are required in publishable mode");
   return options;
-};
-
-const textOf = (value) => {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.map(textOf).join("\n");
-  if (value && typeof value === "object") return Object.values(value).map(textOf).join("\n");
-  return "";
 };
 
 const validateSkillContext = (value, targetSkill, empty) => {
@@ -87,20 +79,10 @@ const audit = ({ dataset, targetSkill, skillContext, baseline, mode = "publishab
     blockers.push(...(Array.isArray(error?.blockers) ? error.blockers : [error instanceof Error ? error.message : String(error)]));
     return { blockers: [...new Set(blockers)], warnings: [...new Set(warnings)], splitCounts: {} };
   }
-  const lineages = new Map();
   const splitCounts = { train: 0, val: 0, test: 0 };
   for (const task of tasks) {
     const label = task.id;
     splitCounts[task.split] += 1;
-    const taskText = textOf(task?.input);
-    if (META_TASK.test(taskText)) warnings.push(`${label}: input may ask the Inference Agent to optimize a Skill instead of perform domain work; review the role boundary.`);
-    if (typeof task?.lineageKey !== "string" || !task.lineageKey.trim()) {
-      warnings.push(`${label}: no lineageKey is available; verify split independence from source provenance.`);
-    } else {
-      const priorLineage = lineages.get(task.lineageKey);
-      if (priorLineage && priorLineage.split !== task?.split) blockers.push(`${label}: lineageKey ${task.lineageKey} crosses ${priorLineage.split}/${task?.split}.`);
-      else if (!priorLineage) lineages.set(task.lineageKey, { id: label, split: task?.split });
-    }
     const allowedPaths = task?.groundTruth?.allowedPaths;
     if (task?.groundTruth?.schema === "wikiskill.scorer.command-exit.v1") {
       if (!Array.isArray(task.groundTruth.command) || task.groundTruth.command.length === 0 || task.groundTruth.command.some((part) => typeof part !== "string")) blockers.push(`${label}: command-exit groundTruth requires a non-empty argv command.`);
