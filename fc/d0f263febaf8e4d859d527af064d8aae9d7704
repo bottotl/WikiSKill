@@ -1,0 +1,40 @@
+README.md
+  s_3d74fb41785753::t_cc47613871dc0d 36-38
+  s_3d74fb41785753::t_fe4f7d0ab07931 188,194-207,218
+package.json
+  s_3d74fb41785753::t_cc47613871dc0d 9
+src/cli.js
+  s_3d74fb41785753::t_2be29dad880253 18,24,51,147-166,212
+skills/wikiskill-evolution/references/evolution-guidelines.md
+  s_3d74fb41785753::t_fe4f7d0ab07931 86-101
+docs/architecture/host-integration.md
+  s_3d74fb41785753::t_cc47613871dc0d 5,7,9,11,13-17,19-21,23,26
+test/meta-skill.test.js
+  s_3d74fb41785753::t_da0cb534d40e41 116-129
+  s_3d74fb41785753::t_cc47613871dc0d 26,28,31
+acceptance/black-box.js
+  s_3d74fb41785753::t_10fe983736d3a6 62-63,70
+examples/cli-config-evolution/scripts/run-live.cjs
+  s_3d74fb41785753::t_10fe983736d3a6 89-90,97
+examples/cli-config-evolution/README.md
+  s_3d74fb41785753::t_10fe983736d3a6 24-25
+skills/wikiskill-evolution/SKILL.md
+  s_3d74fb41785753::t_cc47613871dc0d 55
+  s_3d74fb41785753::t_fe4f7d0ab07931 33,38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "fcd0f263febaf8e4d859d527af064d8aae9d7704",
+  "prompts": {},
+  "sessions": {
+    "s_3d74fb41785753": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a084f5-42c5-7af1-bb3d-d22c3a9f1840",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
