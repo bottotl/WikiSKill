@@ -8,6 +8,7 @@ const { execFileSync } = require("node:child_process");
 const { createBuiltinCapabilityRegistry, learningRefForProvider, runnerRefForProvider } = require("./runtime-capabilities");
 const { createProviderLaunchBudget } = require("./provider-launch-budget");
 const { prepareTaskDependencies } = require("./task-dependencies");
+const { materializeSkillFiles, readSkillFiles, skillBundleDigest, skillSetDigest } = require("./skill-bundle");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const CONFIG_SCHEMA = "wikiskill.workspace.v1";
@@ -70,6 +71,19 @@ const loadWorkspace = async (workspaceInput) => {
   return { workspace, config };
 };
 
+const inspectActiveSkills = async (skillsRoot, { empty = false } = {}) => {
+  if (empty) return [];
+  const inventory = [];
+  for (const entry of (await fs.readdir(skillsRoot, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_ID.test(entry.name)) throw new Error(`Invalid live Skill entry: ${entry.name}`);
+    const sourceFiles = await readSkillFiles(path.join(skillsRoot, entry.name));
+    if (typeof sourceFiles["SKILL.md"] !== "string") throw new Error(`Live Skill is missing SKILL.md: ${entry.name}`);
+    const files = materializeSkillFiles(sourceFiles, `.wikiskill/skills/${entry.name}`);
+    inventory.push({ id: entry.name, bundleDigest: skillBundleDigest(files) });
+  }
+  return inventory;
+};
+
 async function inspectEvolutionBaseline(workspaceInput, targetSkill, { empty = false } = {}) {
   if (!SAFE_ID.test(targetSkill || "")) throw new Error("Evolution target must be a safe Skill id.");
   const { workspace, config } = await loadWorkspace(workspaceInput);
@@ -77,20 +91,23 @@ async function inspectEvolutionBaseline(workspaceInput, targetSkill, { empty = f
   const targetExists = await exists(path.join(targetRoot, "SKILL.md"));
   if (empty && targetExists) throw new Error(`Empty evolution target already exists: ${targetSkill}`);
   if (!empty && !targetExists) throw new Error(`Live target Skill does not exist: ${targetSkill}`);
+  const activeSkills = await inspectActiveSkills(path.join(workspace, ".wikiskill", "skills"), { empty });
   return {
     schema: "wikiskill.evolution-baseline.v1",
     workspaceId: config.workspaceId,
     targetSkill,
     targetSkillDigest: empty ? null : await treeDigest(targetRoot),
+    activeSkills,
+    activeSkillSetDigest: skillSetDigest(activeSkills),
     wikiDigest: await treeDigest(path.join(workspace, ".wikiskill", "wiki"))
   };
 }
 
-const initializeSourceRepo = async (workspace, sourceRoot, { empty = false, retainContextSkills = false } = {}) => {
+const initializeSourceRepo = async (workspace, sourceRoot, { empty = false } = {}) => {
   await fs.mkdir(sourceRoot, { recursive: true });
   const skillsRoot = path.join(sourceRoot, ".wikiskill", "skills");
   await fs.mkdir(skillsRoot, { recursive: true });
-  if (!empty || retainContextSkills) await copyTree(path.join(workspace, ".wikiskill", "skills"), skillsRoot);
+  if (!empty) await copyTree(path.join(workspace, ".wikiskill", "skills"), skillsRoot);
   await copyTree(path.join(workspace, ".wikiskill", "wiki"), path.join(sourceRoot, ".wikiskill", "wiki"));
   execFileSync("git", ["init", "-q", "-b", "main", sourceRoot]);
   execFileSync("git", ["-C", sourceRoot, "config", "user.email", "wikiskill@example.invalid"]);
@@ -300,6 +317,14 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
       throw new Error("Target Skill digest differs from the prepared baseline; evolution launch is blocked.");
     }
   }
+  if (options.expectedActiveSkillSetDigest !== undefined) {
+    if (typeof options.expectedActiveSkillSetDigest !== "string" || !SHA256.test(options.expectedActiveSkillSetDigest)) {
+      throw new Error("Expected active Skill-set digest must be a sha256 digest.");
+    }
+    if (observedBaseline.activeSkillSetDigest !== options.expectedActiveSkillSetDigest) {
+      throw new Error("Active Skill set differs from the prepared baseline; evolution launch is blocked.");
+    }
+  }
   if (options.expectedWikiDigest !== undefined) {
     if (typeof options.expectedWikiDigest !== "string" || !SHA256.test(options.expectedWikiDigest)) {
       throw new Error("Expected Wiki digest must be a sha256 digest.");
@@ -427,13 +452,17 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.launch-budget-selected", runId, budget: launchBudget.snapshot(), estimatedProviderLaunches });
   if (Object.values(frozenComponents).some((value) => !SHA256.test(value))) throw new Error("Evolution component digest could not be frozen.");
   const sourceRoot = path.join(stateRoot, "workspaces", config.workspaceId, "evolutions", runId, "source");
-  const retainContextSkills = tasks.some(task => task.knowledge !== undefined);
-  await initializeSourceRepo(workspace, sourceRoot, { empty: options.empty === true, retainContextSkills });
+  await initializeSourceRepo(workspace, sourceRoot, { empty: options.empty === true });
   const baselineSkillDigest = options.empty ? null : await treeDigest(path.join(sourceRoot, ".wikiskill", "skills", targetSkill));
+  const activeSkills = await inspectActiveSkills(path.join(sourceRoot, ".wikiskill", "skills"), { empty: options.empty === true });
+  const activeSkillSetDigest = skillSetDigest(activeSkills);
   const baselineWikiDigest = await treeDigest(path.join(sourceRoot, ".wikiskill", "wiki"));
   try {
     if (options.expectedTargetSkillDigest !== undefined && baselineSkillDigest !== options.expectedTargetSkillDigest) {
       throw new Error("Frozen target Skill digest differs from the prepared baseline; evolution launch is blocked.");
+    }
+    if (options.expectedActiveSkillSetDigest !== undefined && activeSkillSetDigest !== options.expectedActiveSkillSetDigest) {
+      throw new Error("Frozen active Skill set differs from the prepared baseline; evolution launch is blocked.");
     }
     if (options.expectedWikiDigest !== undefined && baselineWikiDigest !== options.expectedWikiDigest) {
       throw new Error("Frozen Wiki digest differs from the prepared baseline; evolution launch is blocked.");
@@ -447,7 +476,8 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     repo: sourceRoot,
     skillRoots: [".wikiskill/skills"],
     targetSkills: options.empty ? [] : [targetSkill],
-    contextSkills: options.empty && !retainContextSkills ? [] : allSkillDirectories.filter((id) => id !== targetSkill),
+    contextSkills: options.empty ? [] : allSkillDirectories.filter((id) => id !== targetSkill),
+    expectedActiveSkillSetDigest: activeSkillSetDigest,
     ...(options.empty ? { mode: "empty", newSkillRoot: ".wikiskill/skills", newSkillIds: [targetSkill] } : {}),
     dataset: { ...explicit.dataset, adapter: { source: "explicit-file", digest: explicit.dataset.digest } },
     stateRoot: path.join(stateRoot, "engine"),
@@ -465,7 +495,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     model,
     ...(runtime ? { runtime } : {}),
     frozenComponents,
-    configDigest: digest(json({ datasetDigest: selection.datasetDigest, targetSkill, baselineSkillDigest, baselineWikiDigest, frozenComponents, rolloutPolicy, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches } })),
+    configDigest: digest(json({ datasetDigest: selection.datasetDigest, targetSkill, baselineSkillDigest, activeSkillSetDigest, baselineWikiDigest, frozenComponents, rolloutPolicy, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches } })),
     rawReferencePrefix: `.wikiskill/raw/evolutions/${runId}`
   };
   const core = require("./index");

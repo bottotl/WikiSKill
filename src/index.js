@@ -11,6 +11,7 @@ const { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWor
 const { applyCandidate, diffCandidate, rollbackReceipt } = require("./publishing");
 const { renderInferencePrompt } = require("./prompt-contract");
 const { getContextSkill, listContextSkillReceipts, prepareContext, recordContextSkillUse } = require("./context");
+const { initialPurpose, readSkillFiles, skillBundleDigest, skillSetDigest } = require("./skill-bundle");
 
 const ENGINE_VERSION = require("../package.json").version;
 const DATASET_SCHEMA = "wikiskill.dataset.v1";
@@ -195,14 +196,20 @@ async function copyTree(source, destination) {
 async function writeInitialPurpose(destination, skill) {
   const purposePath = path.join(destination, "PURPOSE.md");
   if (await exists(purposePath)) return;
-  await fsp.writeFile(purposePath, [
-    "# Purpose",
-    "",
-    `- Source path: ${skill.path}`,
-    `- Base digest: ${skill.digest}`,
-    "- Wiki pattern: none recorded at run creation."
-  ].join("\n") + "\n", "utf8");
+  const files = await readSkillFiles(destination);
+  await fsp.writeFile(purposePath, initialPurpose(skill.path, skillBundleDigest(files)), "utf8");
 }
+
+const inspectMaterializedSkillSet = async (roots) => {
+  const inventory = [];
+  for (const root of roots) {
+    for (const entry of (await fsp.readdir(root, { withFileTypes: true })).filter((item) => item.isDirectory()).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (inventory.some((skill) => skill.id === entry.name)) throw new WikiSkillError(`Duplicate active Skill id: ${entry.name}.`);
+      inventory.push({ id: entry.name, bundleDigest: skillBundleDigest(await readSkillFiles(path.join(root, entry.name))) });
+    }
+  }
+  return inventory.sort((left, right) => left.id.localeCompare(right.id));
+};
 async function writeTextFile(root, relative, content) {
   const safe = normalizeRelative(relative, "sandbox path");
   const target = path.resolve(root, safe);
@@ -235,13 +242,8 @@ const scoreRange = (score) => typeof score === "number" && Number.isFinite(score
 const renderSkillPrompt = (skills) => Object.entries({ ...(skills.target || {}), ...(skills.context || {}) })
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([id, files]) => {
-    const skill = files["SKILL.md"];
-    const resources = Object.keys(files).filter((file) => file !== "SKILL.md").sort();
-    return [
-      `## Skill: ${id}`,
-      `### SKILL.md\n${skill}`,
-      ...(resources.length ? [`### Additional resources\n${resources.map((file) => `- ${file}`).join("\n")}\nRead a resource only when SKILL.md requires it.`] : [])
-    ].join("\n");
+    const contents = Object.entries(files).sort(([left], [right]) => left.localeCompare(right));
+    return [`## Skill: ${id}`, ...contents.map(([file, content]) => `### ${file}\n${content}`)].join("\n");
   })
   .join("\n\n");
 const resolveRunner = (options, manifest) => {
@@ -410,7 +412,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       throw new WikiSkillError(`Agent runner returned an invalid trajectory for ${task.id}.`);
     }
     const workspaceChanges = captureWorkspaceChanges(environmentWorkdir);
-    const trajectoryId = rollout === 1 ? task.id : `${task.id}:rollout-${rollout}`;
+    const trajectoryId = attemptId;
     const traceFile = rollout === 1 ? `${task.id}.json` : `${task.id}-rollout-${rollout}.json`;
     const evaluationPath = path.join(runRoot, "raw", "evaluations", traceDirectory || `iter-${String(iteration).padStart(2, "0")}`, split, traceFile);
     const evaluationContent = json({ schema: "wikiskill.private-evaluation.v1", traceId: trajectoryId, capabilityRef: task.evaluator.capabilityRef, score: evaluated.score, evidence: evaluated.evidence || {} });
@@ -422,6 +424,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       taskId: task.id,
       split,
       iteration,
+      attempt,
       rollout,
       skillSetDigest: skillDigest,
       events: result.events,
@@ -772,8 +775,14 @@ async function createRun(config) {
     await writeInitialPurpose(destination, skill);
   }
   for (const projected of projectedSkills) await writeProjectedSkill(projected.mode === "target" ? activeRoot : contextRoot, projected);
+  const activeSkills = await inspectMaterializedSkillSet([activeRoot, contextRoot]);
+  const activeSkillSetDigest = skillSetDigest(activeSkills);
+  if (config.expectedActiveSkillSetDigest !== undefined) {
+    if (!/^sha256:[0-9a-f]{64}$/u.test(config.expectedActiveSkillSetDigest)) throw new WikiSkillError("expectedActiveSkillSetDigest must be a sha256 digest when supplied.");
+    if (config.expectedActiveSkillSetDigest !== activeSkillSetDigest) throw new WikiSkillError("Created run active Skill set differs from the frozen evolution baseline.");
+  }
   for (const skill of [...targetSkills, ...projectedTargetSkills]) {
-    const source = skill.projected ? path.join(activeRoot, skill.id) : path.join(inspection.repo, skill.path);
+    const source = path.join(activeRoot, skill.id);
     await copyTree(source, path.join(snapshotRoot, skill.id));
   }
   await fsp.mkdir(path.join(runRoot, "raw", "traces"), { recursive: true });
@@ -820,6 +829,8 @@ async function createRun(config) {
     ...(inspection.remoteIdentity ? { remoteIdentity: inspection.remoteIdentity } : {}),
     targetSkills: [...targetSkills, ...projectedTargetSkills],
     contextSkills: [...contextSkills, ...projectedContextSkills],
+    activeSkills,
+    activeSkillSetDigest,
     ...(newSkillRoot ? { newSkillRoot } : {}),
     ...(newSkillIds.length ? { newSkillIds: [...new Set(newSkillIds)] } : {}),
     workspaceOnlyFiles,
@@ -865,7 +876,7 @@ async function resolveRun(runOrId, stateRoot) {
   if (matches.length !== 1) throw new WikiSkillError(matches.length ? `Run id is ambiguous: ${runOrId}` : `Run not found: ${runOrId}`);
   return matches[0];
 }
-const activeSkillDigest = async (activeRoot) => digestMap(await fileDigestMap(activeRoot));
+const activeSkillDigest = async (activeRoot, contextRoot) => skillSetDigest(await inspectMaterializedSkillSet([activeRoot, contextRoot]));
 async function runEvolution(runOrId, options = {}) {
   const runRoot = await resolveRun(runOrId, options.stateRoot);
   const { manifest } = await readRun(runRoot);
@@ -928,7 +939,7 @@ async function runEvolution(runOrId, options = {}) {
     if (state.bestValidationScore === null) {
       const valBaseline = [];
       for (const task of splitTasks(dataset, "val")) {
-        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) valBaseline.push(await makeTrace({ runRoot, task, split: "val", iteration: 0, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("iter-00"), recordInferenceInvocation }));
+        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) valBaseline.push(await makeTrace({ runRoot, task, split: "val", iteration: 0, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("iter-00"), recordInferenceInvocation }));
       }
       state.bestValidationScore = aggregate(valBaseline);
       state.baselineValidationScore = state.bestValidationScore;
@@ -945,7 +956,7 @@ async function runEvolution(runOrId, options = {}) {
       const trainTasks = splitTasks(dataset, "train");
       for (const task of trainTasks) {
         for (let rollout = 1; rollout <= trainingRolloutsPerTask; rollout += 1) {
-          train.push(await makeTrace({ runRoot, task, split: "train", iteration, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: undefined, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}`), recordInferenceInvocation }));
+          train.push(await makeTrace({ runRoot, task, split: "train", iteration, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: undefined, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}`), recordInferenceInvocation }));
         }
       }
       if (train.length < 4) throw new WikiSkillError("The configured training rollout produced fewer than four trajectories required by the Proposer trace-read contract.");
@@ -987,7 +998,7 @@ async function runEvolution(runOrId, options = {}) {
       await applyProposal(candidateRoot, proposal, proposalPolicy());
       const candidateTraces = [];
       for (const task of splitTasks(dataset, "val")) {
-        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) candidateTraces.push(await makeTrace({ runRoot, task, split: "val", iteration, attempt, rollout, skillDigest: await activeSkillDigest(candidateRoot), skills: await skills(candidateRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}-candidate`), recordInferenceInvocation }));
+        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) candidateTraces.push(await makeTrace({ runRoot, task, split: "val", iteration, attempt, rollout, skillDigest: await activeSkillDigest(candidateRoot, contextRoot), skills: await skills(candidateRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}-candidate`), recordInferenceInvocation }));
       }
       const candidateScore = aggregate(candidateTraces);
       const accepted = candidateScore > state.bestValidationScore;
@@ -1030,12 +1041,12 @@ async function runEvolution(runOrId, options = {}) {
     const baselineTest = [];
     const baselineRoot = path.join(runRoot, "skills", "snapshots");
     for (const task of splitTasks(dataset, "test")) {
-      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) baselineTest.push(await makeTrace({ runRoot, task, split: "test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(baselineRoot), skills: await skills(baselineRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final-baseline"), recordInferenceInvocation }));
+      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) baselineTest.push(await makeTrace({ runRoot, task, split: "test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(baselineRoot, contextRoot), skills: await skills(baselineRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final-baseline"), recordInferenceInvocation }));
     }
     state.baselineTestScore = aggregate(baselineTest);
     const test = [];
     for (const task of splitTasks(dataset, "test")) {
-      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) test.push(await makeTrace({ runRoot, task, split: "test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final"), recordInferenceInvocation }));
+      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) test.push(await makeTrace({ runRoot, task, split: "test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final"), recordInferenceInvocation }));
     }
     state.testScore = aggregate(test);
     state.testGain = state.testScore - state.baselineTestScore;

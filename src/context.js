@@ -3,6 +3,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { materializeSkillFiles, readSkillFiles, skillBundleDigest, skillSetDigest } = require("./skill-bundle");
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -19,21 +20,6 @@ const resolveWorkspace = async (input) => {
   return { workspace, config };
 };
 
-const readTree = async (root) => {
-  const files = {};
-  const walk = async (current) => {
-    const entries = await fs.readdir(current, { withFileTypes: true });
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      const target = path.join(current, entry.name);
-      if (entry.isSymbolicLink()) throw new Error(`Skill snapshots do not allow symlinks: ${target}`);
-      if (entry.isDirectory()) await walk(target);
-      else if (entry.isFile()) files[path.relative(root, target).split(path.sep).join("/")] = await fs.readFile(target, "utf8");
-    }
-  };
-  await walk(root);
-  return files;
-};
-
 const readContext = async (workspace, contextId) => {
   if (!SAFE_ID.test(contextId || "")) throw new Error("context id must be safe text.");
   const root = path.join(workspace, ".wikiskill", "runtime", "contexts", contextId);
@@ -48,9 +34,10 @@ async function prepareContext(input) {
   const skills = [];
   for (const entry of (await fs.readdir(liveRoot, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_ID.test(entry.name)) throw new Error(`Invalid live Skill entry: ${entry.name}`);
-    const files = await readTree(path.join(liveRoot, entry.name));
-    if (typeof files["SKILL.md"] !== "string") throw new Error(`Live Skill is missing SKILL.md: ${entry.name}`);
-    skills.push({ id: entry.name, files, bundleDigest: digest(json(files)) });
+    const sourceFiles = await readSkillFiles(path.join(liveRoot, entry.name));
+    if (typeof sourceFiles["SKILL.md"] !== "string") throw new Error(`Live Skill is missing SKILL.md: ${entry.name}`);
+    const files = materializeSkillFiles(sourceFiles, `${config.liveSkillsPath}/${entry.name}`);
+    skills.push({ id: entry.name, files, bundleDigest: skillBundleDigest(files) });
   }
   const contextId = `context-${crypto.randomUUID()}`;
   const contextsRoot = path.join(workspace, ".wikiskill", "runtime", "contexts");
@@ -66,7 +53,7 @@ async function prepareContext(input) {
       }
     }
     const inventory = skills.map(({ id, bundleDigest }) => ({ id, bundleDigest }));
-    const skillSetDigest = digest(json(inventory));
+    const bundleDigest = skillSetDigest(inventory);
     const manifest = {
       schema: "wikiskill.context.v1",
       contextId,
@@ -86,7 +73,7 @@ async function prepareContext(input) {
       contractDigest,
       instructions: "Use only Skills from this frozen context. Read a Skill with skills.getCommand and record every consumed Skill with skills.usedCommand.",
       skills: {
-        bundleDigest: skillSetDigest,
+        bundleDigest,
         inventory: manifest.inventory,
         getCommand: ["wikiskill", "context", "skill-get", "--workspace", workspace, "--context", contextId, "--skill", "<skill-id>", "--json"],
         usedCommand: ["wikiskill", "context", "receipt", "--workspace", workspace, "--context", contextId, "--skill", "<skill-id>", "--json"]
@@ -104,8 +91,8 @@ async function getContextSkill(input, contextId, skillId) {
   const context = await readContext(workspace, contextId);
   const descriptor = context.manifest.inventory.find((skill) => skill.id === skillId);
   if (!descriptor) throw new Error(`Skill is not present in the frozen context: ${skillId}`);
-  const files = await readTree(path.join(context.root, "skills", skillId));
-  if (digest(json(files)) !== descriptor.bundleDigest) throw new Error(`Frozen Skill digest mismatch: ${skillId}`);
+  const files = await readSkillFiles(path.join(context.root, "skills", skillId));
+  if (skillBundleDigest(files) !== descriptor.bundleDigest) throw new Error(`Frozen Skill digest mismatch: ${skillId}`);
   return { contextId, skillId, bundleDigest: descriptor.bundleDigest, files };
 }
 

@@ -174,8 +174,9 @@ WikiSkill 只把 `input` 和 `outputSchema` 传给 Inference Agent；ground trut
 
 ```sh
 wikiskill dataset validate --dataset dataset.json --scorer builtin:exact-output-v1 --json
-wikiskill evolution baseline --workspace . --target <skill-id> --json
-wikiskill evolve --workspace . --expected-workspace-id <workspace-id> --target <skill-id> --dataset dataset.json --expected-dataset-digest <validated-dataset-digest> --expected-target-skill-digest <baseline-skill-digest> --expected-wiki-digest <baseline-wiki-digest> --provider claude --model <model-id> --reasoning-effort low --scorer builtin:exact-output-v1 --tool-profile none --iterations 1 --max-provider-launches 24 --json-events
+wikiskill context prepare --workspace . --json > skill-context.json
+wikiskill evolution baseline --workspace . --target <skill-id> --json > baseline.json
+wikiskill evolve --workspace . --expected-workspace-id <workspace-id> --target <skill-id> --dataset dataset.json --expected-dataset-digest <validated-dataset-digest> --expected-target-skill-digest <baseline-skill-digest> --expected-active-skill-set-digest <baseline-active-skill-set-digest> --expected-wiki-digest <baseline-wiki-digest> --provider claude --model <model-id> --reasoning-effort low --scorer builtin:exact-output-v1 --tool-profile none --iterations 1 --max-provider-launches 24 --json-events
 wikiskill status --workspace . --run <run-id> --json
 ```
 
@@ -185,7 +186,28 @@ wikiskill status --workspace . --run <run-id> --json
 
 `wikiskill dataset verify-known-fix` 是已有修复补丁的缺陷诊断命令，用于检查该补丁在指定任务上的 RED→GREEN 表现；它不是通用演化的启动条件。合法任务集与 scorer 可以在没有已知补丁时用于演化。
 
-使用 `--empty` 可以从空的 S0/W0 创建第一个 Skill。
+## Experiment Authoring Skill
+
+The package includes `skills/wikiskill-evolution/SKILL.md` for designing,
+auditing, running, and interpreting Skill-evolution experiments. Before an
+expensive rollout, run its zero-dependency preflight alongside the canonical
+dataset validator:
+
+```sh
+wikiskill context prepare --workspace . --json > skill-context.json
+wikiskill evolution baseline --workspace . --target <skill-id> --json > baseline.json
+node skills/wikiskill-evolution/scripts/audit-experiment.js --dataset dataset.json --target-skill <skill-id> --scorer <scorer-ref> --skill-context skill-context.json --baseline baseline.json --mode publishable --json
+wikiskill dataset validate --dataset dataset.json --scorer <scorer-ref> --json
+```
+
+Publishable preflight blocks Inference meta-tasks, target-Skill writes, missing
+lineage, split leakage, scorer drift, and missing active-Skill context. Use
+`--mode smoke` only for non-publishing harness diagnosis. Semantic
+task/fixture/scorer alignment still requires domain review. Audit a completed
+run with `scripts/audit-run.js --run-root <run-root> --workspace <workspace>`
+before candidate publication.
+
+使用 `--empty` 可以从空的 active S0 创建第一个 Skill；若要复现论文的空 W0，需从新初始化且尚未积累模式的 Wiki 开始。
 上层产品必须先执行 `dataset validate` 和 `evolution baseline`，再把返回的 workspace、
 dataset、target Skill 和 Wiki 摘要传入 `evolve`。任一 authority 在准备后发生变化，
 都会在创建 evolution run 前被阻断。

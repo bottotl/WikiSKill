@@ -254,6 +254,7 @@ test("public CLI runs an explicit dataset without creating dataset views", async
     "--dataset", datasetPath,
     "--expected-dataset-digest", datasetDigest,
     "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
     "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
@@ -287,6 +288,9 @@ test("public CLI inspects the clean-start Skill and Wiki baseline without creati
   assert.equal(baseline.schema, "wikiskill.evolution-baseline.v1");
   assert.equal(baseline.targetSkill, "target-skill");
   assert.match(baseline.targetSkillDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.deepEqual(baseline.activeSkills.map((skill) => skill.id), ["target-skill"]);
+  assert.match(baseline.activeSkills[0].bundleDigest, /^sha256:[0-9a-f]{64}$/u);
+  assert.match(baseline.activeSkillSetDigest, /^sha256:[0-9a-f]{64}$/u);
   assert.match(baseline.wikiDigest, /^sha256:[0-9a-f]{64}$/u);
   assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
 });
@@ -301,6 +305,7 @@ test("public CLI requires a prepared dataset digest", async () => {
     "--target", "target-skill",
     "--dataset", datasetPath,
     "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
     "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
@@ -318,6 +323,34 @@ test("public CLI requires a prepared dataset digest", async () => {
   assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
 });
 
+test("public CLI requires the prepared active Skill-set digest", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const baseline = await baselineFor(workspace, "target-skill");
+  const output = [];
+  const code = await execute([
+    "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
+    "--target", "target-skill",
+    "--dataset", datasetPath,
+    "--expected-dataset-digest", await digestForDataset(datasetPath),
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
+    "--provider", "claude",
+    "--model", "test-model",
+    "--reasoning-effort", "low",
+    "--scorer", "scorer:test",
+    "--tool-profile", "none",
+    "--iterations", "1",
+    "--max-provider-launches", "100",
+    "--state-root", stateRoot,
+    "--run-id", "missing-active-skill-set-digest",
+    "--json-events"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.match(output.join(""), /requires --expected-active-skill-set-digest/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
 test("public CLI rejects a prepared dataset digest mismatch", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   const baseline = await baselineFor(workspace, "target-skill");
@@ -329,6 +362,7 @@ test("public CLI rejects a prepared dataset digest mismatch", async () => {
     "--dataset", datasetPath,
     "--expected-dataset-digest", "0".repeat(64),
     "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
     "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
@@ -359,6 +393,7 @@ test("public CLI rejects target Skill drift from the prepared baseline", async (
     "--dataset", datasetPath,
     "--expected-dataset-digest", datasetDigest,
     "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
     "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
@@ -376,6 +411,39 @@ test("public CLI rejects target Skill drift from the prepared baseline", async (
   assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
 });
 
+test("public CLI rejects context Skill drift from the prepared baseline", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const contextRoot = path.join(workspace, ".wikiskill", "skills", "context-helper");
+  await fs.mkdir(contextRoot);
+  await fs.writeFile(path.join(contextRoot, "SKILL.md"), "---\nname: context-helper\ndescription: Supply context.\n---\n\nInitial context.\n");
+  const baseline = await baselineFor(workspace, "target-skill");
+  await fs.appendFile(path.join(contextRoot, "SKILL.md"), "\nUnreviewed drift.\n");
+  const output = [];
+  const code = await execute([
+    "evolve", "--workspace", workspace,
+    "--expected-workspace-id", baseline.workspaceId,
+    "--target", "target-skill",
+    "--dataset", datasetPath,
+    "--expected-dataset-digest", await digestForDataset(datasetPath),
+    "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
+    "--expected-wiki-digest", baseline.wikiDigest,
+    "--provider", "claude",
+    "--model", "test-model",
+    "--reasoning-effort", "low",
+    "--scorer", "scorer:test",
+    "--tool-profile", "none",
+    "--iterations", "1",
+    "--max-provider-launches", "100",
+    "--state-root", stateRoot,
+    "--run-id", "context-skill-drift",
+    "--json-events"
+  ], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 1);
+  assert.match(output.join(""), /Active Skill set differs from the prepared baseline/u);
+  assert.equal(await fs.access(path.join(stateRoot, "workspaces")).then(() => true, () => false), false);
+});
+
 test("public CLI rejects persistent Wiki drift from the prepared baseline", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   const baseline = await baselineFor(workspace, "target-skill");
@@ -389,6 +457,7 @@ test("public CLI rejects persistent Wiki drift from the prepared baseline", asyn
     "--dataset", datasetPath,
     "--expected-dataset-digest", datasetDigest,
     "--expected-target-skill-digest", baseline.targetSkillDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
     "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",
@@ -414,6 +483,7 @@ test("rechecks the actual frozen Skill snapshot after initial baseline validatio
     expectedDatasetDigest: await digestForDataset(datasetPath),
     expectedWorkspaceId: baseline.workspaceId,
     expectedTargetSkillDigest: baseline.targetSkillDigest,
+    expectedActiveSkillSetDigest: baseline.activeSkillSetDigest,
     expectedWikiDigest: baseline.wikiDigest,
     provider: "claude",
     modelId: "test-model",
@@ -432,6 +502,36 @@ test("rechecks the actual frozen Skill snapshot after initial baseline validatio
   assert.equal(await fs.access(path.join(stateRoot, "engine", "runs")).then(() => true, () => false), false);
 });
 
+test("rechecks the actual frozen context Skill snapshot after initial baseline validation", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const contextRoot = path.join(workspace, ".wikiskill", "skills", "context-helper");
+  await fs.mkdir(contextRoot);
+  await fs.writeFile(path.join(contextRoot, "SKILL.md"), "---\nname: context-helper\ndescription: Supply context.\n---\n\nInitial context.\n");
+  const baseline = await baselineFor(workspace, "target-skill");
+  await assert.rejects(evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    expectedDatasetDigest: await digestForDataset(datasetPath),
+    expectedWorkspaceId: baseline.workspaceId,
+    expectedTargetSkillDigest: baseline.targetSkillDigest,
+    expectedActiveSkillSetDigest: baseline.activeSkillSetDigest,
+    expectedWikiDigest: baseline.wikiDigest,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:test",
+    stateRoot,
+    runId: "frozen-context-skill-drift",
+    adapter,
+    runner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    onEvent: (event) => {
+      if (event.type === "evolution.dataset-selected") fsSync.appendFileSync(path.join(contextRoot, "SKILL.md"), "\nConcurrent drift.\n");
+    }
+  }), /Frozen active Skill set differs from the prepared baseline/u);
+  assert.equal(await fs.access(path.join(stateRoot, "engine", "runs")).then(() => true, () => false), false);
+});
+
 test("rechecks the actual frozen Wiki snapshot after initial baseline validation", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   const baseline = await baselineFor(workspace, "target-skill");
@@ -440,6 +540,7 @@ test("rechecks the actual frozen Wiki snapshot after initial baseline validation
     expectedDatasetDigest: await digestForDataset(datasetPath),
     expectedWorkspaceId: baseline.workspaceId,
     expectedTargetSkillDigest: baseline.targetSkillDigest,
+    expectedActiveSkillSetDigest: baseline.activeSkillSetDigest,
     expectedWikiDigest: baseline.wikiDigest,
     provider: "claude",
     modelId: "test-model",
@@ -495,6 +596,7 @@ test("public empty mode creates, applies, and rolls back the first Skill", async
     "--target", "target-skill",
     "--dataset", datasetPath,
     "--expected-dataset-digest", datasetDigest,
+    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
     "--expected-wiki-digest", baseline.wikiDigest,
     "--provider", "claude",
     "--model", "test-model",

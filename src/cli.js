@@ -16,7 +16,7 @@ wikiskill bootstrap install|uninstall --workspace <repo> --command <context-comm
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
 wikiskill dataset verify-known-fix --dataset <dataset.json> --scorer <ref> --patch <changes.patch> --json
-wikiskill evolve --workspace <workspace> --expected-workspace-id <id> --target <skill-id> --dataset <dataset.json> --expected-dataset-digest <sha256> [--expected-target-skill-digest <sha256>] --expected-wiki-digest <sha256> --provider codex|claude --model <id> --reasoning-effort <level> --scorer <ref> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--runner-timeout-ms <ms>] [--empty] [--run-id <id>] --json-events
+wikiskill evolve --workspace <workspace> --expected-workspace-id <id> --target <skill-id> --dataset <dataset.json> --expected-dataset-digest <sha256> [--expected-target-skill-digest <sha256>] --expected-active-skill-set-digest <sha256> --expected-wiki-digest <sha256> --provider codex|claude --model <id> --reasoning-effort <level> --scorer <ref> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--runner-timeout-ms <ms>] [--empty] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
 wikiskill candidate diff --workspace <workspace> --candidate <id> --json
@@ -42,6 +42,7 @@ const VALUE_FLAGS = Object.freeze({
   "--dataset": "datasetPath",
   "--expected-dataset-digest": "expectedDatasetDigest",
   "--expected-target-skill-digest": "expectedTargetSkillDigest",
+  "--expected-active-skill-set-digest": "expectedActiveSkillSetDigest",
   "--expected-wiki-digest": "expectedWikiDigest",
   "--target": "target",
   "--candidate": "candidate",
@@ -143,6 +144,7 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
         if (!options.expectedWorkspaceId) throw new Error("evolve --dataset requires --expected-workspace-id from evolution baseline.");
         if (!options.expectedDatasetDigest) throw new Error("evolve --dataset requires --expected-dataset-digest from dataset validate.");
         if (!options.empty && !options.expectedTargetSkillDigest) throw new Error("evolve --dataset requires --expected-target-skill-digest from evolution baseline.");
+        if (!options.expectedActiveSkillSetDigest) throw new Error("evolve --dataset requires --expected-active-skill-set-digest from evolution baseline.");
         if (!options.expectedWikiDigest) throw new Error("evolve --dataset requires --expected-wiki-digest from evolution baseline.");
       }
       data = await withAbort((signal) => runEvolutionCommand(options, io, signal, (id) => { emittedRunId = id; }));

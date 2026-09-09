@@ -175,6 +175,7 @@ test("runs seeded evolution with strict validation gate and isolated workspace",
   assert.equal(baselineDigests.skills.find((skill) => skill.id === "one").files["SKILL.md"], digestText("# One\nAlways inspect the source before editing.\n"));
   assert.equal(await fs.readFile(path.join(manifest.runRoot, "dataset/dataset.json"), "utf8"), await fs.readFile(path.join(manifest.runRoot, "tasks/task-set.json"), "utf8"));
   assert.match(await fs.readFile(path.join(manifest.runRoot, "skills/active/one/PURPOSE.md"), "utf8"), /Source path: .agents\/skills\/one/);
+  assert.equal(await fs.readFile(path.join(manifest.runRoot, "skills/snapshots/one/PURPOSE.md"), "utf8"), await fs.readFile(path.join(manifest.runRoot, "skills/active/one/PURPOSE.md"), "utf8"));
   assert.equal(await fs.access(path.join(repo, ".agents/skills/one/PURPOSE.md")).then(() => true).catch(() => false), false);
   const runner = async ({ task: current }) => ({ prediction: { value: "ok" }, events: [{ type: "assistant", text: current.id }] });
   const adapter = { renderTask: ({ task: current }) => current.taskContext, extractPrediction: ({ result }) => result.prediction, score: ({ prediction, groundTruth }) => ({ score: prediction.value === groundTruth.value ? 1 : 0, evidence: { match: true } }) };
@@ -234,12 +235,22 @@ test("accepts only a strict validation improvement and never mutates context Ski
     { ...task("test", "test", { value: "improved" }), sandbox: { "input.txt": "test-input" } }
   ] };
   const manifest = await createRun({ repo, skillRoots: [".agents/skills", ".claude/skills"], targetSkills: ["one"], contextSkills: ["two"], dataset, stateRoot, runId: "run-strict" });
-  const runner = async ({ task: current, skills }) => ({ prediction: { value: Object.values(skills.target.one || {}).some((text) => text.includes("Updated")) ? "improved" : "old" }, events: [{ type: "assistant", text: current.id }] });
+  let baselineSystemPrompt;
+  const runner = async ({ task: current, skills, systemPrompt }) => {
+    baselineSystemPrompt ||= systemPrompt;
+    return { prediction: { value: Object.values(skills.target.one || {}).some((text) => text.includes("Updated")) ? "improved" : "old" }, events: [{ type: "assistant", text: current.id }] };
+  };
   const adapter = { extractPrediction: ({ result }) => result.prediction, score: ({ prediction, groundTruth }) => ({ score: prediction.value === groundTruth.value ? 1 : 0 }) };
   await runEvolution(manifest.runRoot, { runner, adapter, iterationLimit: 1, proposer: async (input) => { const traceReads = readFourTraces(input); return { action: "patch", skillId: "one", files: { "SKILL.md": "# One\nUpdated guidance.\n" }, traceReads }; } });
   const state = JSON.parse(await fs.readFile(path.join(manifest.runRoot, "runs/state.json"), "utf8"));
+  const baselineTrace = JSON.parse(await fs.readFile(path.join(manifest.runRoot, "raw/traces/iter-00/val/val.json"), "utf8"));
   assert.deepEqual(state.acceptedIterations, [1]);
   assert.equal(state.bestValidationScore, 1);
+  assert.deepEqual(manifest.activeSkills.map((skill) => skill.id), ["one", "two"]);
+  assert.equal(baselineTrace.skillSetDigest, manifest.activeSkillSetDigest);
+  assert.match(baselineSystemPrompt, /Always inspect the source before editing/u);
+  assert.match(baselineSystemPrompt, /Keep changes focused/u);
+  assert.match(baselineSystemPrompt, /### PURPOSE[.]md/u);
   assert.equal(await fs.readFile(path.join(manifest.runRoot, "skills/context/two/SKILL.md"), "utf8"), "# Two\nKeep changes focused.\n");
   const dryRun = await applyRun(manifest.runRoot, { repo, dryRun: true });
   assert.deepEqual(dryRun.changedPaths, [".agents/skills/one/SKILL.md"]);

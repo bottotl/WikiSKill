@@ -95,6 +95,7 @@ async function main(argv = process.argv.slice(2)) {
       "--dataset", datasetPath,
       "--expected-dataset-digest", datasetDigest,
       "--expected-target-skill-digest", baseline.targetSkillDigest,
+      "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
       "--expected-wiki-digest", baseline.wikiDigest,
       "--provider", "codex",
       "--model", options.model,

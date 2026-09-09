@@ -66,6 +66,7 @@ const main = async () => {
       "--dataset", datasetPath,
       "--expected-dataset-digest", datasetDigest,
       "--expected-target-skill-digest", baselineState.targetSkillDigest,
+      "--expected-active-skill-set-digest", baselineState.activeSkillSetDigest,
       "--expected-wiki-digest", baselineState.wikiDigest,
       "--provider", "claude",
       "--model", "fixture-model",

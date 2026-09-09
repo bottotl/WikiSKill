@@ -8,6 +8,7 @@ const test = require("node:test");
 
 const { execute } = require("../src/cli");
 const { getContextSkill, listContextSkillReceipts, prepareContext, recordContextSkillUse } = require("../src/context");
+const { inspectEvolutionBaseline } = require("../src/evolution");
 const { initWorkspace } = require("../src/workspace");
 
 const setup = async () => {
@@ -28,10 +29,19 @@ test("prepares an immutable Skill context and records consumption", async () => 
   const frozen = await getContextSkill(workspace, prepared.contextId, "review-code");
   assert.match(frozen.files["SKILL.md"], /baseline guidance/u);
   assert.doesNotMatch(frozen.files["SKILL.md"], /changed live guidance/u);
+  assert.match(frozen.files["PURPOSE.md"], /Source path: [.]+wikiskill\/skills\/review-code/u);
   const receipt = await recordContextSkillUse(workspace, prepared.contextId, "review-code");
   assert.equal(receipt.bundleDigest, frozen.bundleDigest);
   assert.equal(await fs.access(path.join(workspace, ".wikiskill", "runtime", "contexts", prepared.contextId, "receipts", `${receipt.receiptId}.json`)).then(() => true), true);
   assert.deepEqual((await listContextSkillReceipts(workspace, prepared.contextId)).receipts, [receipt]);
+});
+
+test("context and evolution baseline freeze the same materialized active Skill set", async () => {
+  const { workspace } = await setup();
+  const prepared = await prepareContext(workspace);
+  const baseline = await inspectEvolutionBaseline(workspace, "review-code");
+  assert.deepEqual(baseline.activeSkills, prepared.skills.inventory);
+  assert.equal(baseline.activeSkillSetDigest, prepared.skills.bundleDigest);
 });
 
 test("uses one stable Skill-set digest across independent frozen contexts", async () => {
