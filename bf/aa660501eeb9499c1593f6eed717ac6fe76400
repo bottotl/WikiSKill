@@ -1,0 +1,48 @@
+fixtures/basic-flywheel/README.md
+  s_3d74fb41785753::t_2e9a95dd303cfc 23-24
+src/claude-learning.js
+  s_3d74fb41785753::t_6c493eeff511f4 50
+test/core.test.js
+  s_3d74fb41785753::t_f49f5d86bab45b 544
+  s_3d74fb41785753::t_599108cb4f2989 547
+src/index.js
+  s_3d74fb41785753::t_6c493eeff511f4 660
+skills/wikiskill-evolution/SKILL.md
+  s_3d74fb41785753::t_8285938aa06401 10,12-18,22-24,46,61
+skills/wikiskill-evolution/references/evolution-guidelines.md
+  s_3d74fb41785753::t_8285938aa06401 32-49,68-71,102-105
+  s_3d74fb41785753::t_4122e8950d23f9 106
+  s_3d74fb41785753::t_1162e06d0d5ae6 107
+examples/cli-config-evolution/scripts/run-live.cjs
+  s_3d74fb41785753::t_1851a6829f4a41 89-91,93,96-99
+test/codex-learning.test.js
+  s_3d74fb41785753::t_fa46324f73f749 109
+examples/cli-config-evolution/README.md
+  s_3d74fb41785753::t_2e9a95dd303cfc 24-25
+README.md
+  s_3d74fb41785753::t_bca7f415c7e2ec 51-52,261,272
+  s_3d74fb41785753::t_fb3c2c9754a0d7 43-44,47-50,53-54,266-268,273-274
+test/evolution.test.js
+  s_3d74fb41785753::t_f49f5d86bab45b 234
+  s_3d74fb41785753::t_599108cb4f2989 630,634
+test/claude-learning.test.js
+  s_3d74fb41785753::t_321fed3793ae13 21
+src/codex-learning.js
+  s_3d74fb41785753::t_6c493eeff511f4 182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.2",
+  "base_commit_sha": "bfaa660501eeb9499c1593f6eed717ac6fe76400",
+  "prompts": {},
+  "sessions": {
+    "s_3d74fb41785753": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a084f5-42c5-7af1-bb3d-d22c3a9f1840",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
