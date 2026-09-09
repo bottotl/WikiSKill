@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { createBuiltinCapabilityRegistry, createCapabilityRegistry, learningRefForProvider, runnerRefForProvider } = require("../src/runtime-capabilities");
+const { createBuiltinCapabilityRegistry, createCapabilityRegistry, learningRefForProvider, runnerRefForProvider, validateBuiltinScorerInput } = require("../src/runtime-capabilities");
 
 test("sealed runtime registry resolves runner and scorer capabilities by exact ref", () => {
   const registry = createCapabilityRegistry();
@@ -38,6 +38,14 @@ test("built-in command-exit scorer is registered with its shipped implementation
   const expected = `sha256:${crypto.createHash("sha256").update(Buffer.concat([source, Buffer.from("\0")])).digest("hex")}`;
   assert.equal(typeof registry.resolveScorer("builtin:command-exit-v1", {}).score, "function");
   assert.equal(descriptor.implementationDigest, expected);
+});
+
+test("built-in scorers validate their own private task inputs", () => {
+  assert.doesNotThrow(() => validateBuiltinScorerInput("builtin:exact-output-v1", { schema: "wikiskill.scorer.exact-output.v1", expected: { value: "ok" } }));
+  assert.throws(() => validateBuiltinScorerInput("builtin:exact-output-v1", { schema: "wikiskill.scorer.exact-output.v1" }), /with expected/u);
+  assert.doesNotThrow(() => validateBuiltinScorerInput("builtin:command-exit-v1", { schema: "wikiskill.scorer.command-exit.v1", command: ["node", "--test"] }));
+  assert.throws(() => validateBuiltinScorerInput("builtin:command-exit-v1", { schema: "wikiskill.scorer.command-exit.v1", command: [] }), /non-empty string array/u);
+  assert.doesNotThrow(() => validateBuiltinScorerInput("plugin:custom-scorer", { opaque: true }));
 });
 
 test("built-in Claude learning descriptor digests its complete shipped implementation", () => {

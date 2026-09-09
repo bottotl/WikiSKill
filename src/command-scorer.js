@@ -6,7 +6,7 @@ const path = require("node:path");
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
-const validate = (input) => {
+const validateCommandExitInput = (input) => {
   if (!input || typeof input !== "object" || Array.isArray(input) || input.schema !== "wikiskill.scorer.command-exit.v1") {
     throw new Error("builtin:command-exit-v1 requires wikiskill.scorer.command-exit.v1 privateInput.");
   }
@@ -102,7 +102,7 @@ const run = ({ command, timeoutMs, workdir, environment = {} }) => new Promise((
 });
 
 const createCommandExitScorer = () => async ({ privateInput, workdir, environment }) => {
-  const plan = validate(privateInput);
+  const plan = validateCommandExitInput(privateInput);
   const result = await run({ ...plan, workdir, environment });
   const changes = changedPaths(workdir);
   const disallowedPaths = plan.allowedPaths.length ? changes.filter((value) => !plan.allowedPaths.includes(value)) : [];
@@ -123,4 +123,4 @@ const createCommandExitScorer = () => async ({ privateInput, workdir, environmen
   };
 };
 
-module.exports = { createCommandExitScorer };
+module.exports = { createCommandExitScorer, validateCommandExitInput };

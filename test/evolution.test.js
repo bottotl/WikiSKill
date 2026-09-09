@@ -157,6 +157,7 @@ test("result indexes fresh Inference and learning-role Provider sessions", async
   assert.equal(runtimeEvidence.schema, "wikiskill.runtime-evidence.v2");
   assert.equal(runtimeEvidence.inference.length, inferenceIndex);
   assert.equal(new Set(runtimeEvidence.inference.map((item) => item.provider.sessionId)).size, inferenceIndex);
+  assert.deepEqual(new Set(runtimeEvidence.inference.map((item) => item.phase)), new Set(["baseline_validation", "training", "candidate_validation", "baseline_test", "final_test"]));
   assert.deepEqual(runtimeEvidence.learning.map((item) => item.role), ["maintainer", "proposer-select", "proposer"]);
   assert.equal(JSON.stringify(runtimeEvidence).includes("SYSTEM SKILL"), false);
   assert.match(result.runtimeEvidenceDigest, /^sha256:[0-9a-f]{64}$/u);

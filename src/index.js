@@ -16,6 +16,7 @@ const { initialPurpose, readSkillFiles, skillBundleDigest, skillSetDigest } = re
 const ENGINE_VERSION = require("../package.json").version;
 const DATASET_SCHEMA = "wikiskill.dataset.v1";
 const TRAJECTORY_SCHEMA = "wikiskill.trajectory.v1";
+const INFERENCE_PHASES = new Set(["baseline_validation", "training", "candidate_validation", "baseline_test", "final_test"]);
 const ENVELOPE = (data, warnings = [], blockers = [], nextActions = []) => ({
   success: blockers.length === 0,
   data,
@@ -327,7 +328,8 @@ const persistFailedAttempt = async ({ runRoot, attemptId, task, split, iteration
   }
 };
 
-async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1, skillDigest, skills, adapter, runner, model, abortSignal, wiki, traceDirectory, recordInferenceInvocation }) {
+async function makeTrace({ runRoot, task, split, phase, iteration, attempt, rollout = 1, skillDigest, skills, adapter, runner, model, abortSignal, wiki, traceDirectory, recordInferenceInvocation }) {
+  if (!INFERENCE_PHASES.has(phase)) throw new WikiSkillError(`Inference phase is invalid: ${String(phase)}`);
   const attemptId = `${String(attempt ?? 1).padStart(2, "0")}-${String(iteration).padStart(2, "0")}-${split}-${task.id}-${rollout}`;
   const phaseId = (traceDirectory || `iter-${String(iteration).padStart(2, "0")}`).split(/[\\/]/u).join("-");
   const workdir = path.join(runRoot, "environments", `${phaseId}-${attemptId}`);
@@ -369,6 +371,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       environment,
       workdir: environmentWorkdir,
       split,
+      phase,
       iteration,
       adapterConfig
     });
@@ -404,7 +407,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
     });
     const knowledgeConsumption = knowledgeContext?.verify(result.events, result.isolationEvidence);
     const provider = result.provider ? normalizeProviderSession(result.provider, "Inference") : undefined;
-    if (provider) await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, iteration, rollout, provider });
+    if (provider) await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, phase, iteration, rollout, provider });
     const prediction = await (adapter.extractPrediction || defaultAdapter.extractPrediction)({ task: visibleTask, result, split, iteration, adapterConfig });
     const evaluated = await (adapter.score || defaultAdapter.score)({ task, prediction, groundTruth: task.groundTruth, environment, workdir: environmentWorkdir, split, iteration, adapterConfig });
     if (!scoreRange(evaluated?.score)) throw new WikiSkillError(`Evaluator returned invalid score for ${task.id}.`);
@@ -423,6 +426,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       id: trajectoryId,
       taskId: task.id,
       split,
+      phase,
       iteration,
       attempt,
       rollout,
@@ -923,7 +927,8 @@ async function runEvolution(runOrId, options = {}) {
   };
   const recordInferenceInvocation = async (value) => {
     const provider = await registerRuntimeSession("inference", value.provider);
-    state.inferenceInvocations = [...(state.inferenceInvocations || []), { schema: "wikiskill.inference-invocation.v1", launchRef: value.launchRef, taskId: value.taskId, split: value.split, iteration: value.iteration, rollout: value.rollout, provider }];
+    if (!INFERENCE_PHASES.has(value.phase)) throw new WikiSkillError(`Inference invocation phase is invalid: ${String(value.phase)}`);
+    state.inferenceInvocations = [...(state.inferenceInvocations || []), { schema: "wikiskill.inference-invocation.v1", launchRef: value.launchRef, taskId: value.taskId, split: value.split, phase: value.phase, iteration: value.iteration, rollout: value.rollout, provider }];
     await fsp.writeFile(statePath, json(state));
   };
   const recordLearningInvocation = async (value) => {
@@ -939,7 +944,7 @@ async function runEvolution(runOrId, options = {}) {
     if (state.bestValidationScore === null) {
       const valBaseline = [];
       for (const task of splitTasks(dataset, "val")) {
-        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) valBaseline.push(await makeTrace({ runRoot, task, split: "val", iteration: 0, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("iter-00"), recordInferenceInvocation }));
+        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) valBaseline.push(await makeTrace({ runRoot, task, split: "val", phase: "baseline_validation", iteration: 0, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("iter-00"), recordInferenceInvocation }));
       }
       state.bestValidationScore = aggregate(valBaseline);
       state.baselineValidationScore = state.bestValidationScore;
@@ -956,7 +961,7 @@ async function runEvolution(runOrId, options = {}) {
       const trainTasks = splitTasks(dataset, "train");
       for (const task of trainTasks) {
         for (let rollout = 1; rollout <= trainingRolloutsPerTask; rollout += 1) {
-          train.push(await makeTrace({ runRoot, task, split: "train", iteration, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: undefined, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}`), recordInferenceInvocation }));
+          train.push(await makeTrace({ runRoot, task, split: "train", phase: "training", iteration, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: undefined, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}`), recordInferenceInvocation }));
         }
       }
       if (train.length < 4) throw new WikiSkillError("The configured training rollout produced fewer than four trajectories required by the Proposer trace-read contract.");
@@ -998,7 +1003,7 @@ async function runEvolution(runOrId, options = {}) {
       await applyProposal(candidateRoot, proposal, proposalPolicy());
       const candidateTraces = [];
       for (const task of splitTasks(dataset, "val")) {
-        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) candidateTraces.push(await makeTrace({ runRoot, task, split: "val", iteration, attempt, rollout, skillDigest: await activeSkillDigest(candidateRoot, contextRoot), skills: await skills(candidateRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}-candidate`), recordInferenceInvocation }));
+        for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) candidateTraces.push(await makeTrace({ runRoot, task, split: "val", phase: "candidate_validation", iteration, attempt, rollout, skillDigest: await activeSkillDigest(candidateRoot, contextRoot), skills: await skills(candidateRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}-candidate`), recordInferenceInvocation }));
       }
       const candidateScore = aggregate(candidateTraces);
       const accepted = candidateScore > state.bestValidationScore;
@@ -1041,12 +1046,12 @@ async function runEvolution(runOrId, options = {}) {
     const baselineTest = [];
     const baselineRoot = path.join(runRoot, "skills", "snapshots");
     for (const task of splitTasks(dataset, "test")) {
-      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) baselineTest.push(await makeTrace({ runRoot, task, split: "test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(baselineRoot, contextRoot), skills: await skills(baselineRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final-baseline"), recordInferenceInvocation }));
+      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) baselineTest.push(await makeTrace({ runRoot, task, split: "test", phase: "baseline_test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(baselineRoot, contextRoot), skills: await skills(baselineRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final-baseline"), recordInferenceInvocation }));
     }
     state.baselineTestScore = aggregate(baselineTest);
     const test = [];
     for (const task of splitTasks(dataset, "test")) {
-      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) test.push(await makeTrace({ runRoot, task, split: "test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final"), recordInferenceInvocation }));
+      for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) test.push(await makeTrace({ runRoot, task, split: "test", phase: "final_test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final"), recordInferenceInvocation }));
     }
     state.testScore = aggregate(test);
     state.testGain = state.testScore - state.baselineTestScore;
@@ -1138,7 +1143,7 @@ async function createResultBundle(runRoot, manifest, state) {
   const inference = [];
   for (const tracePath of await sortedFiles(path.join(runRoot, "raw", "traces"))) {
     const trace = JSON.parse(await fsp.readFile(tracePath, "utf8"));
-    if (trace.provider) inference.push({ launchRef: trace.launchRef, traceId: trace.id, traceRef: path.relative(runRoot, tracePath).split(path.sep).join("/"), provider: trace.provider });
+    if (trace.provider) inference.push({ launchRef: trace.launchRef, traceId: trace.id, traceRef: path.relative(runRoot, tracePath).split(path.sep).join("/"), taskId: trace.taskId, split: trace.split, phase: trace.phase, iteration: trace.iteration, rollout: trace.rollout, provider: trace.provider });
   }
   const runtimeEvidence = {
     schema: "wikiskill.runtime-evidence.v2",

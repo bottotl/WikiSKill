@@ -102,6 +102,13 @@ test("public dataset validate uses the standalone dataset and scorer contract", 
   const mismatch = [];
   assert.equal(await execute(["dataset", "validate", "--dataset", datasetPath, "--scorer", "other", "--json"], { stdout: (line) => mismatch.push(line), stderr: () => {} }), 1);
   assert.match(JSON.parse(mismatch.join("")).blockers[0], /must match --scorer/u);
+
+  const malformed = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  delete malformed.tasks[0].groundTruth.expected;
+  await fs.writeFile(datasetPath, JSON.stringify(malformed));
+  const invalid = [];
+  assert.equal(await execute(["dataset", "validate", "--dataset", datasetPath, "--scorer", "builtin:exact-output-v1", "--json"], { stdout: (line) => invalid.push(line), stderr: () => {} }), 1);
+  assert.match(JSON.parse(invalid.join("")).blockers[0], /privateInput with expected/u);
 });
 
 test("zero-source-write init leaves instruction files untouched", async () => {

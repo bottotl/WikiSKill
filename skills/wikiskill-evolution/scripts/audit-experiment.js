@@ -81,19 +81,7 @@ const audit = ({ dataset, targetSkill, skillContext, baseline, mode = "publishab
   }
   const splitCounts = { train: 0, val: 0, test: 0 };
   for (const task of tasks) {
-    const label = task.id;
     splitCounts[task.split] += 1;
-    const allowedPaths = task?.groundTruth?.allowedPaths;
-    if (task?.groundTruth?.schema === "wikiskill.scorer.command-exit.v1") {
-      if (!Array.isArray(task.groundTruth.command) || task.groundTruth.command.length === 0 || task.groundTruth.command.some((part) => typeof part !== "string")) blockers.push(`${label}: command-exit groundTruth requires a non-empty argv command.`);
-      if (!Array.isArray(allowedPaths) || allowedPaths.length === 0) blockers.push(`${label}: command-exit groundTruth requires explicit allowedPaths.`);
-    }
-    if (Array.isArray(allowedPaths)) {
-      const targetPattern = new RegExp(`(?:^|/)${targetSkill.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:/|$)`, "u");
-      const skillPaths = allowedPaths.filter((entry) => typeof entry === "string" && targetPattern.test(entry));
-      if (skillPaths.length) warnings.push(`${label}: allowedPaths may expose the target Skill to the task checkout (${skillPaths.join(", ")}); review the path semantics.`);
-      if (allowedPaths.length > 8) warnings.push(`${label}: allowedPaths contains ${allowedPaths.length} entries; review whether the task contract is too broad.`);
-    }
   }
   for (const split of Object.keys(splitCounts)) {
     if (splitCounts[split] === 1) warnings.push(`Dataset has only one ${split} task; treat results as a smoke unless independence is established externally.`);

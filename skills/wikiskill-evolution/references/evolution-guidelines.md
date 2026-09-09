@@ -67,7 +67,7 @@ The paper starts from `(S0, W0) = (empty, empty)`. Seeded evolution of an existi
 
 Preserve separate evidence for task correctness, required evidence, prohibited side effects, authorized write scope, and execution efficiency when relevant. A binary score may require every mandatory dimension, but diagnostics should identify the failed dimension.
 
-For command-scored tasks, use an argv array and bounded timeout. Keep private expectations in `groundTruth`; pass only task input and the public output schema to the Inference Agent.
+For command-scored tasks, use an argv array and bounded timeout. The canonical dataset validator delegates private-input validation to the selected built-in scorer. Keep private expectations in `groundTruth`; pass only task input and the public output schema to the Inference Agent.
 
 ## Interpret and Publish
 

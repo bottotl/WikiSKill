@@ -12,6 +12,8 @@ wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> 
 wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipts --workspace <workspace> --context <id> --json
 wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empty] --json
+wikiskill experiment audit --dataset <dataset.json> --target <skill-id> [--skill-context <context.json>] [--baseline <baseline.json>] [--mode publishable|smoke] [--empty] --json
+wikiskill run audit --run-root <run-root> --workspace <workspace> --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
@@ -28,6 +30,8 @@ const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   evolution: new Set(["baseline"]),
+  experiment: new Set(["audit"]),
+  run: new Set(["audit"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate", "verify-known-fix", "compile-commit", "recommend-commit"]),
 });
@@ -40,6 +44,9 @@ const VALUE_FLAGS = Object.freeze({
   "--mode": "mode",
   "--input": "input",
   "--dataset": "datasetPath",
+  "--skill-context": "skillContextPath",
+  "--baseline": "baselinePath",
+  "--run-root": "runRoot",
   "--expected-dataset-digest": "expectedDatasetDigest",
   "--expected-target-skill-digest": "expectedTargetSkillDigest",
   "--expected-active-skill-set-digest": "expectedActiveSkillSetDigest",
@@ -161,6 +168,27 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
     } else if (options.command === "evolution") {
       if (options.subcommand !== "baseline") throw new Error("Only `evolution baseline` is supported.");
       data = await core.inspectEvolutionBaseline(options.workspace, options.target, { empty: options.empty === true });
+    } else if (options.command === "experiment") {
+      if (options.subcommand !== "audit" || !options.datasetPath || !options.target) throw new Error("experiment audit requires --dataset and --target.");
+      const datasetPath = path.resolve(options.datasetPath);
+      const skillContextPath = options.skillContextPath ? path.resolve(options.skillContextPath) : undefined;
+      const baselinePath = options.baselinePath ? path.resolve(options.baselinePath) : undefined;
+      const audit = require("../skills/wikiskill-evolution/scripts/audit-experiment").audit;
+      const result = audit({
+        dataset: JSON.parse(await fs.readFile(datasetPath, "utf8")),
+        targetSkill: options.target,
+        skillContext: skillContextPath ? JSON.parse(await fs.readFile(skillContextPath, "utf8")) : null,
+        baseline: baselinePath ? JSON.parse(await fs.readFile(baselinePath, "utf8")) : null,
+        mode: options.mode || "publishable",
+        empty: options.empty === true
+      });
+      data = { schema: "wikiskill.experiment-audit.v1", datasetPath, targetSkill: options.target, mode: options.mode || "publishable", splitCounts: result.splitCounts, ...(skillContextPath ? { skillContextPath } : {}), ...(baselinePath ? { baselinePath } : {}) };
+      return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve every blocker, then rerun the canonical dataset validation and experiment audit."] : []), result.blockers.length ? 1 : 0, io);
+    } else if (options.command === "run") {
+      if (options.subcommand !== "audit" || !options.runRoot || !options.workspace) throw new Error("run audit requires --run-root and --workspace.");
+      const result = require("../skills/wikiskill-evolution/scripts/audit-run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace) });
+      data = { schema: "wikiskill.run-audit.v1", ...result.data };
+      return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the run evidence blockers before candidate publication."] : []), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "bootstrap") {
       if (options.subcommand !== "install" && options.subcommand !== "uninstall") throw new Error("Only `bootstrap install` and `bootstrap uninstall` are supported.");
       if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");
@@ -179,6 +207,8 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       if (!options.datasetPath || !options.scorerRef) throw new Error("dataset validate requires --dataset and --scorer.");
       const dataset = core.validateDataset(JSON.parse(await fs.readFile(path.resolve(options.datasetPath), "utf8")));
       if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== options.scorerRef)) throw new Error("Every dataset task evaluator must match --scorer.");
+      const { validateBuiltinScorerInput } = require("./runtime-capabilities");
+      for (const task of dataset.tasks) validateBuiltinScorerInput(options.scorerRef, task.groundTruth);
       data = {
         schema: "wikiskill.dataset-validation.v1",
         datasetPath: path.resolve(options.datasetPath),

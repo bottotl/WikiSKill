@@ -76,19 +76,21 @@ const auditRun = (runRoot, { workspace } = {}) => {
   if (!SHA256.test(manifest.activeSkillSetDigest || "") || manifest.activeSkillSetDigest !== activeSkillSetDigest) blockers.push("Run manifest active Skill-set digest does not match its inventory.");
 
   const runtimeSessions = state.runtimeSessions || [];
+  const phaseSplits = { baseline_validation: "val", training: "train", candidate_validation: "val", baseline_test: "test", final_test: "test" };
 
   const traceFiles = visitJson(path.join(runRoot, "raw", "traces"));
   const traces = traceFiles.map(readJson);
   if (new Set(traces.map((trace) => trace.id)).size !== traces.length) blockers.push("Raw trajectories contain duplicate ids across iterations or attempts.");
+  for (const trace of traces) if (phaseSplits[trace.phase] !== trace.split) blockers.push(`${trace.id}: trajectory phase ${String(trace.phase)} does not match split ${String(trace.split)}.`);
   const traceById = new Map(traces.map((trace) => [trace.id, trace]));
 
   const inferenceInvocations = state.inferenceInvocations || [];
   const learningInvocations = state.learningInvocations || [];
   let testPhaseStarted = false;
   for (const invocation of inferenceInvocations) {
-    if (invocation.split === "test") {
+    if (phaseSplits[invocation.phase] !== invocation.split) blockers.push(`${invocation.launchRef}: inference phase ${String(invocation.phase)} does not match split ${String(invocation.split)}.`);
+    if (invocation.phase === "baseline_test" || invocation.phase === "final_test") {
       testPhaseStarted = true;
-      if (!/^inference:(?:attempt-[0-9]+-)?final(?:-baseline)?:test:/u.test(invocation.launchRef || "")) blockers.push(`${invocation.launchRef}: test task ran outside final evaluation.`);
     } else if (testPhaseStarted) blockers.push(`${invocation.launchRef}: non-test inference ran after final test evaluation started.`);
   }
 
@@ -101,7 +103,7 @@ const auditRun = (runRoot, { workspace } = {}) => {
     for (const traceId of proposal.traceReads || []) {
       const trace = traceById.get(traceId);
       if (!trace) blockers.push(`Proposal reads unknown trace ${traceId}.`);
-      else if (trace.split !== "train") blockers.push(`Proposal reads non-training trace ${traceId} (${trace.split}).`);
+      else if (trace.phase !== "training" || trace.split !== "train") blockers.push(`Proposal reads non-training trace ${traceId} (${trace.phase}/${trace.split}).`);
       else if (trace.iteration !== history.iteration || trace.attempt !== history.attempt) blockers.push(`Proposal reads trace ${traceId} from iteration/attempt ${trace.iteration}/${trace.attempt}, expected ${history.iteration}/${history.attempt}.`);
     }
   }
@@ -110,8 +112,8 @@ const auditRun = (runRoot, { workspace } = {}) => {
     const testInvocations = inferenceInvocations.filter((item) => item.split === "test");
     if (!testInvocations.length) blockers.push("Dataset has test tasks but the terminal run contains no test invocation.");
     for (const task of taskSet.tasks.filter((item) => item.split === "test")) {
-      if (!testInvocations.some((item) => item.taskId === task.id && /^inference:(?:attempt-[0-9]+-)?final-baseline:test:/u.test(item.launchRef || ""))) blockers.push(`${task.id}: missing final baseline test invocation.`);
-      if (!testInvocations.some((item) => item.taskId === task.id && /^inference:(?:attempt-[0-9]+-)?final:test:/u.test(item.launchRef || ""))) blockers.push(`${task.id}: missing final candidate test invocation.`);
+      if (!testInvocations.some((item) => item.taskId === task.id && item.phase === "baseline_test")) blockers.push(`${task.id}: missing final baseline test invocation.`);
+      if (!testInvocations.some((item) => item.taskId === task.id && item.phase === "final_test")) blockers.push(`${task.id}: missing final candidate test invocation.`);
     }
   }
 

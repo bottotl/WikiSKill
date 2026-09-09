@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
-const { createBuiltinCapabilityRegistry, learningRefForProvider, runnerRefForProvider } = require("./runtime-capabilities");
+const { createBuiltinCapabilityRegistry, learningRefForProvider, runnerRefForProvider, validateBuiltinScorerInput } = require("./runtime-capabilities");
 const { createProviderLaunchBudget } = require("./provider-launch-budget");
 const { prepareTaskDependencies } = require("./task-dependencies");
 const { materializeSkillFiles, readSkillFiles, skillBundleDigest, skillSetDigest } = require("./skill-bundle");
@@ -259,6 +259,7 @@ const loadExplicitDataset = async (datasetPath, runtimeInput) => {
   if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== runtimeInput.scorerRef)) {
     throw new Error("Every explicit dataset task evaluator must match --scorer.");
   }
+  for (const task of dataset.tasks) validateBuiltinScorerInput(runtimeInput.scorerRef, task.groundTruth);
   return {
     dataset,
     selection: {

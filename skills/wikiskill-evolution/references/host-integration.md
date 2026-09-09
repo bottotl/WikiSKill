@@ -20,6 +20,8 @@ A domain adapter may provide:
 
 Hosts and adapters must not copy or redefine the generic evolution method. Distribute this Skill from the WikiSkill package or a pinned repository revision.
 
+Use the official `wikiskill experiment audit` and `wikiskill run audit` commands. The bundled scripts exist only as compatibility entry points.
+
 ## Required Host Behavior
 
 - Preserve the complete active Skill inventory and bundle digest, target Skill, Wiki, dataset, model, and runtime digests through launch. Pass the baseline active Skill-set digest into `evolve`; a context receipt alone is not a launch-time drift guard.

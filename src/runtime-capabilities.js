@@ -7,7 +7,7 @@ const { createClaudeRunner } = require("./claude-runner");
 const { createCodexRunner } = require("./codex-runner");
 const codexLearning = require("./codex-learning");
 const claudeLearning = require("./claude-learning");
-const { createCommandExitScorer } = require("./command-scorer");
+const { createCommandExitScorer, validateCommandExitInput } = require("./command-scorer");
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const canonical = (value) => Array.isArray(value)
@@ -76,12 +76,22 @@ const createCapabilityRegistry = () => {
   });
 };
 
-const exactOutputScorer = async ({ prediction, privateInput }) => {
+const validateExactOutputInput = (privateInput) => {
   if (!privateInput || typeof privateInput !== "object" || Array.isArray(privateInput) || privateInput.schema !== "wikiskill.scorer.exact-output.v1" || !Object.hasOwn(privateInput, "expected")) {
     throw new Error("builtin:exact-output-v1 requires wikiskill.scorer.exact-output.v1 privateInput with expected.");
   }
+  return privateInput;
+};
+
+const exactOutputScorer = async ({ prediction, privateInput }) => {
+  validateExactOutputInput(privateInput);
   const matched = JSON.stringify(canonical(prediction)) === JSON.stringify(canonical(privateInput.expected));
   return { score: matched ? 1 : 0, evidence: { matched } };
+};
+
+const validateBuiltinScorerInput = (ref, privateInput) => {
+  if (ref === "builtin:exact-output-v1") validateExactOutputInput(privateInput);
+  else if (ref === "builtin:command-exit-v1") validateCommandExitInput(privateInput);
 };
 
 const createBuiltinCapabilityRegistry = () => {
@@ -145,4 +155,4 @@ const learningRefForProvider = (provider) => {
   return ref;
 };
 
-module.exports = { createBuiltinCapabilityRegistry, createCapabilityRegistry, learningRefForProvider, runnerRefForProvider, scoreWithBuiltin };
+module.exports = { createBuiltinCapabilityRegistry, createCapabilityRegistry, learningRefForProvider, runnerRefForProvider, scoreWithBuiltin, validateBuiltinScorerInput };

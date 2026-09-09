@@ -21,24 +21,26 @@ Use WikiSkill to improve reusable Agent procedure from task experience while kee
 4. Run the preflight audit before any Provider rollout:
 
    ```sh
-   node skills/wikiskill-evolution/scripts/audit-experiment.js \
+   wikiskill experiment audit \
      --dataset <dataset.json> \
-     --target-skill <skill-id> \
+     --target <skill-id> \
      --skill-context <skill-context.json> \
      --baseline <baseline.json> \
      --mode publishable \
      --json
    ```
 
-   Resolve contract blockers. Review suspicious write-scope and sample-size warnings; task semantics and split provenance require human or source-level review rather than keyword-based rejection.
+   Resolve contract blockers. Review sample-size warnings; task semantics, write scope, and split provenance require human or source-level review.
    Use `--mode smoke` only for harness diagnosis. Smoke warnings may be reviewed, but a smoke run must never publish a candidate.
 5. A known-fix RED-to-GREEN check is optional diagnostic evidence, not an evolution prerequisite, and its patch must remain hidden from Inference Agents.
 6. Start `wikiskill evolve` with the prepared workspace, dataset, target Skill, complete active Skill-set, and Wiki digests plus explicit Provider, model, reasoning effort, scorer, tool profile, iteration count, launch budget, and run id. Pass `--expected-active-skill-set-digest <baseline-active-skill-set-digest>` in addition to the target and Wiki digests. Use `--runner-timeout-ms` only when the task duration justifies a frozen non-default timeout.
 7. Audit the terminal run before interpretation or publication:
 
    ```sh
-   node skills/wikiskill-evolution/scripts/audit-run.js --run-root <run-root> --workspace <workspace> --json
+   wikiskill run audit --run-root <run-root> --workspace <workspace> --json
    ```
+
+   Use `scripts/audit-experiment.js` and `scripts/audit-run.js` only when maintaining older automation that predates these official CLI subcommands.
 
 8. Interpret and publish the result using [evolution-guidelines.md](references/evolution-guidelines.md). Strict validation gain is required. `no_action`, rejection, and Wiki-only growth are valid outcomes.
 

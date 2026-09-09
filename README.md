@@ -197,16 +197,17 @@ dataset validator:
 wikiskill dataset validate --dataset dataset.json --scorer <scorer-ref> --json
 wikiskill context prepare --workspace . --json > skill-context.json
 wikiskill evolution baseline --workspace . --target <skill-id> --json > baseline.json
-node skills/wikiskill-evolution/scripts/audit-experiment.js --dataset dataset.json --target-skill <skill-id> --skill-context skill-context.json --baseline baseline.json --mode publishable --json
+wikiskill experiment audit --dataset dataset.json --target <skill-id> --skill-context skill-context.json --baseline baseline.json --mode publishable --json
 ```
 
-The canonical validator owns dataset structure and scorer consistency. The
-experiment audit blocks frozen-context conflicts and reports suspicious write
-paths and small splits as review warnings. Task semantics, split provenance,
-and task/fixture/scorer alignment still require domain review. Use `--mode
-smoke` only for non-publishing harness diagnosis. Audit a completed run with
-`scripts/audit-run.js --run-root <run-root> --workspace <workspace>` before
-candidate publication.
+The canonical validator owns dataset structure and scorer-specific task
+contracts. The experiment audit blocks frozen-context conflicts and reports
+small splits as review warnings. Task semantics, split provenance, and
+task/fixture/scorer alignment still require domain review. Use `--mode smoke`
+only for non-publishing harness diagnosis. Audit a completed run with
+`wikiskill run audit --run-root <run-root> --workspace <workspace> --json`
+before candidate publication. The bundled Node scripts remain compatibility
+entry points for older automation.
 
 使用 `--empty` 可以从空的 active S0 创建第一个 Skill；若要复现论文的空 W0，需从新初始化且尚未积累模式的 Wiki 开始。
 上层产品必须先执行 `dataset validate` 和 `evolution baseline`，再把返回的 workspace、

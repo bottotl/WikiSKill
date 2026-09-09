@@ -49,7 +49,7 @@ test("experiment audit accepts a structurally valid smoke and reports sample-siz
   assert.equal(result.warnings.filter((warning) => /only one/u.test(warning)).length, 3);
 });
 
-test("experiment audit reports suspicious write scope as review warnings", () => {
+test("experiment audit remains domain-agnostic for scorer-specific task fields", () => {
   const train = exactTask("train-1", "train", "Perform domain validation.");
   train.groundTruth.allowedPaths = [
     "skills/repo-validation/SKILL.md",
@@ -75,8 +75,7 @@ test("experiment audit reports suspicious write scope as review warnings", () =>
     mode: "smoke"
   });
   assert.deepEqual(result.blockers, []);
-  assert.equal(result.warnings.some((warning) => /expose the target Skill/u.test(warning)), true);
-  assert.equal(result.warnings.some((warning) => /contains 9 entries/u.test(warning)), true);
+  assert.equal(result.warnings.some((warning) => /allowedPaths|target Skill/u.test(warning)), false);
 });
 
 test("experiment audit CLI returns a stable nonzero blocker envelope", () => {
@@ -95,6 +94,21 @@ test("experiment audit CLI returns a stable nonzero blocker envelope", () => {
   assert.equal(output.schema, "wikiskill.experiment-audit.v1");
   assert.equal(output.success, false);
   assert.equal(output.blockers.length, 4);
+});
+
+test("official experiment audit CLI exposes the Meta-Skill audit", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-experiment-cli-"));
+  const datasetPath = path.join(root, "dataset.json");
+  fs.writeFileSync(datasetPath, JSON.stringify({ schema: "wikiskill.dataset.v1", tasks: [
+    exactTask("train-1", "train", "Train"),
+    exactTask("val-1", "val", "Validate"),
+    exactTask("test-1", "test", "Test")
+  ] }));
+  const result = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "wikiskill"), "experiment", "audit", "--dataset", datasetPath, "--target", "repo-validation", "--mode", "smoke", "--json"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stdout || result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.success, true);
+  assert.equal(output.data.schema, "wikiskill.experiment-audit.v1");
 });
 
 test("publishable audit requires and validates the complete active Skill context", () => {
@@ -168,10 +182,10 @@ test("terminal run audit verifies the Raw receipt, strict gating, final-only tes
   }));
   const provider = (sessionId) => ({ ref: "provider:test", modelId: "model-1", sessionId });
   const writeTrace = (relative, trace) => fs.writeFileSync(path.join(root, "raw", "traces", relative), JSON.stringify({ schema: "wikiskill.trajectory.v1", attempt: 1, rollout: 1, ...trace }));
-  writeTrace(path.join("iter-01", "train", "train-1.json"), { id: "train-trace", taskId: "train-1", split: "train", iteration: 1, launchRef: "inference:iter-01:train:train-1:1", provider: provider("session-1") });
-  writeTrace(path.join("iter-01-candidate", "val", "val-1.json"), { id: "val-trace", taskId: "val-1", split: "val", iteration: 1, launchRef: "inference:iter-01-candidate:val:val-1:1", provider: provider("session-2") });
-  writeTrace(path.join("final-baseline", "test", "test-1.json"), { id: "baseline-test-trace", taskId: "test-1", split: "test", iteration: 2, launchRef: "inference:final-baseline:test:test-1:1", provider: provider("session-3") });
-  writeTrace(path.join("final", "test", "test-1.json"), { id: "test-trace", taskId: "test-1", split: "test", iteration: 2, launchRef: "inference:final:test:test-1:1", provider: provider("session-4") });
+  writeTrace(path.join("iter-01", "train", "train-1.json"), { id: "train-trace", taskId: "train-1", split: "train", phase: "training", iteration: 1, launchRef: "inference:iter-01:train:train-1:1", provider: provider("session-1") });
+  writeTrace(path.join("iter-01-candidate", "val", "val-1.json"), { id: "val-trace", taskId: "val-1", split: "val", phase: "candidate_validation", iteration: 1, launchRef: "inference:iter-01-candidate:val:val-1:1", provider: provider("session-2") });
+  writeTrace(path.join("final-baseline", "test", "test-1.json"), { id: "baseline-test-trace", taskId: "test-1", split: "test", phase: "baseline_test", iteration: 2, launchRef: "inference:final-baseline:test:test-1:1", provider: provider("session-3") });
+  writeTrace(path.join("final", "test", "test-1.json"), { id: "test-trace", taskId: "test-1", split: "test", phase: "final_test", iteration: 2, launchRef: "inference:final:test:test-1:1", provider: provider("session-4") });
   fs.writeFileSync(path.join(root, "runs", "proposals", "proposal.json"), JSON.stringify({ action: "patch", traceReads: ["train-trace"] }));
   fs.writeFileSync(path.join(root, "runs", "state.json"), JSON.stringify({
     status: "completed",
@@ -188,10 +202,10 @@ test("terminal run audit verifies the Raw receipt, strict gating, final-only tes
       { kind: "learning", provider: provider("session-6") }
     ],
     inferenceInvocations: [
-      { launchRef: "inference:iter-01:train:train-1:1", taskId: "train-1", split: "train", iteration: 1, rollout: 1, provider: provider("session-1") },
-      { launchRef: "inference:iter-01-candidate:val:val-1:1", taskId: "val-1", split: "val", iteration: 1, rollout: 1, provider: provider("session-2") },
-      { launchRef: "inference:final-baseline:test:test-1:1", taskId: "test-1", split: "test", iteration: 2, rollout: 1, provider: provider("session-3") },
-      { launchRef: "inference:final:test:test-1:1", taskId: "test-1", split: "test", iteration: 2, rollout: 1, provider: provider("session-4") }
+      { launchRef: "inference:iter-01:train:train-1:1", taskId: "train-1", split: "train", phase: "training", iteration: 1, rollout: 1, provider: provider("session-1") },
+      { launchRef: "inference:iter-01-candidate:val:val-1:1", taskId: "val-1", split: "val", phase: "candidate_validation", iteration: 1, rollout: 1, provider: provider("session-2") },
+      { launchRef: "inference:final-baseline:test:test-1:1", taskId: "test-1", split: "test", phase: "baseline_test", iteration: 2, rollout: 1, provider: provider("session-3") },
+      { launchRef: "inference:final:test:test-1:1", taskId: "test-1", split: "test", phase: "final_test", iteration: 2, rollout: 1, provider: provider("session-4") }
     ],
     learningInvocations: [
       { launchRef: "learning:1:1:maintainer", role: "maintainer", provider: provider("session-5") },
@@ -209,6 +223,9 @@ test("terminal run audit verifies the Raw receipt, strict gating, final-only tes
   assert.deepEqual(result.blockers, []);
   assert.equal(result.data.activeSkillSetDigest, activeSkillSetDigest);
   assert.equal(result.data.activeSkills.length, 2);
+  const cli = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "wikiskill"), "run", "audit", "--run-root", root, "--workspace", workspace, "--json"], { encoding: "utf8" });
+  assert.equal(cli.status, 0, cli.stdout || cli.stderr);
+  assert.equal(JSON.parse(cli.stdout).data.schema, "wikiskill.run-audit.v1");
   fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest: `sha256:${"f".repeat(64)}` }));
   assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /receipt does not match/u.test(blocker)), true);
 });
