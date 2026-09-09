@@ -90,13 +90,13 @@ const createBuiltinCapabilityRegistry = () => {
     ref: "provider:codex",
     apiVersion: "wikiskill.runner.v1",
     implementationVersion: "1",
-    implementationDigest: implementationDigestFor(["codex-runner.js"])
+    implementationDigest: implementationDigestFor(["codex-runner.js", "clean-environment.js"])
   }, (config) => createCodexRunner(config));
   registry.registerRunner({
     ref: "provider:claude",
     apiVersion: "wikiskill.runner.v1",
     implementationVersion: "1",
-    implementationDigest: implementationDigestFor(["claude-runner.js"])
+    implementationDigest: implementationDigestFor(["claude-runner.js", "inference-isolation.js", "clean-environment.js"])
   }, (config) => createClaudeRunner(config));
   registry.registerScorer({
     ref: "builtin:exact-output-v1",

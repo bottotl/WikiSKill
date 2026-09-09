@@ -95,6 +95,13 @@ function validateDataset(dataset) {
     if (!["train", "val", "test"].includes(task.split)) blockers.push(`${prefix}.split must be train, val, or test.`);
     if (!("input" in task) || task.input === undefined) blockers.push(`${prefix}.input is required and may contain any serializable domain payload.`);
     if (task.taskContext !== undefined && (typeof task.taskContext !== "string" || !task.taskContext.trim())) blockers.push(`${prefix}.taskContext must be non-empty text when supplied.`);
+    if (task.knowledge !== undefined) {
+      try { require("./knowledge-context").validateKnowledgeRef(task.knowledge); } catch (error) { blockers.push(error.message); }
+    }
+    if (task.repositorySnapshot !== undefined) {
+      try { require("./repository-snapshot").validateSnapshotRef(task.repositorySnapshot); } catch (error) { blockers.push(error.message); }
+      if (task.sandbox !== undefined) blockers.push("repositorySnapshot and sandbox are mutually exclusive.");
+    }
     if (task.sandbox !== undefined && !isRecord(task.sandbox)) blockers.push(`${prefix}.sandbox must be Record<string,string> when supplied.`);
     else for (const [key, value] of Object.entries(task.sandbox || {})) {
       try { normalizeRelative(key, `${prefix}.sandbox key`); } catch (error) { blockers.push(error.message); }
@@ -104,7 +111,7 @@ function validateDataset(dataset) {
     if (!("groundTruth" in task) || task.groundTruth === undefined) blockers.push(`${prefix}.groundTruth is required and may contain any serializable domain payload.`);
     if (!isRecord(task.evaluator) || typeof task.evaluator.capabilityRef !== "string" || !task.evaluator.capabilityRef.trim()) blockers.push(`${prefix}.evaluator.capabilityRef must be non-empty text.`);
     if (task.outputSchema !== undefined && !isRecord(task.outputSchema)) blockers.push(`${prefix}.outputSchema must be a JSON Schema object when supplied.`);
-    const pairFingerprint = sha256(json({ input: task.input, groundTruth: task.groundTruth, sandbox: task.sandbox || {} }));
+    const pairFingerprint = sha256(json({ input: task.input, groundTruth: task.groundTruth, sandbox: task.sandbox || {}, repositorySnapshot: task.repositorySnapshot?.digest }));
     if (taskPairFingerprints.has(pairFingerprint) && taskPairFingerprints.get(pairFingerprint) !== task.split) blockers.push(`cross-split task-pair leakage between ${taskPairFingerprints.get(pairFingerprint)} and ${task.split}.`);
     else taskPairFingerprints.set(pairFingerprint, task.split);
   }
@@ -323,6 +330,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
   const phaseId = (traceDirectory || `iter-${String(iteration).padStart(2, "0")}`).split(/[\\/]/u).join("-");
   const workdir = path.join(runRoot, "environments", `${phaseId}-${attemptId}`);
   await fsp.mkdir(workdir, { recursive: true });
+  if (task.repositorySnapshot) await require("./repository-snapshot").materializeRepositorySnapshot(workdir, task.repositorySnapshot);
   for (const [relative, content] of Object.entries(task.sandbox || {})) {
     if (typeof content === "string") await writeTextFile(workdir, relative, content);
     else {
@@ -340,11 +348,13 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
     input: task.input,
     ...(task.outputSchema === undefined ? {} : { outputSchema: task.outputSchema }),
     ...(task.taskContext === undefined ? {} : { taskContext: task.taskContext }),
-    ...(task.sandbox === undefined ? {} : { sandbox: task.sandbox })
+    ...(task.sandbox === undefined ? {} : { sandbox: task.sandbox }),
+    ...(task.repositorySnapshot === undefined ? {} : { repositorySnapshot: task.repositorySnapshot })
   };
   const adapterConfig = adapter.config;
   let environment;
   let environmentWorkdir = workdir;
+  let knowledgeContext;
   try {
     environment = await (adapter.prepareEnvironment || defaultAdapter.prepareEnvironment)({ task: visibleTask, split, iteration, workdir, adapterConfig });
     environmentWorkdir = typeof environment === "string" ? environment : environment?.workdir ?? workdir;
@@ -366,10 +376,11 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
     if (executionContext?.environment !== undefined && (!isRecord(executionContext.environment) || Object.values(executionContext.environment).some((value) => typeof value !== "string"))) {
       throw new WikiSkillError("Adapter materializeExecutionContext.environment must be a string map.");
     }
+    if (task.knowledge) knowledgeContext = await require("./knowledge-context").prepareKnowledgeContext(task.knowledge, environmentWorkdir, skills);
     const systemPrompt = renderInferencePrompt({
       split,
       taskId: task.id,
-      requiredInstructions: typeof executionContext?.requiredInstructions === "string" ? executionContext.requiredInstructions : "",
+      requiredInstructions: [executionContext?.requiredInstructions || "", knowledgeContext?.instructions || ""].filter(Boolean).join("\n\n"),
       skills: renderSkillPrompt(skills)
     });
     const launchRef = `inference:${phaseId}:${split}:${task.id}:${rollout}`;
@@ -386,8 +397,10 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       split,
       iteration,
       launchRef,
+      ...(knowledgeContext ? { isolation: knowledgeContext.isolation } : {}),
       ...(executionContext?.environment ? { environment: executionContext.environment } : {})
     });
+    const knowledgeConsumption = knowledgeContext?.verify(result.events, result.isolationEvidence);
     const provider = result.provider ? normalizeProviderSession(result.provider, "Inference") : undefined;
     if (provider) await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, iteration, rollout, provider });
     const prediction = await (adapter.extractPrediction || defaultAdapter.extractPrediction)({ task: visibleTask, result, split, iteration, adapterConfig });
@@ -412,6 +425,8 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
       rollout,
       skillSetDigest: skillDigest,
       events: result.events,
+      ...(result.usage ? { providerUsage: result.usage } : {}),
+      ...(knowledgeConsumption ? { knowledgeConsumption } : {}),
       ...(provider ? { provider } : {}),
       ...(provider ? { launchRef } : {}),
       prediction,
@@ -432,6 +447,7 @@ async function makeTrace({ runRoot, task, split, iteration, attempt, rollout = 1
     }
     throw error;
   } finally {
+    await knowledgeContext?.close();
     await (adapter.disposeEnvironment || defaultAdapter.disposeEnvironment)({ task: visibleTask, environment, split, iteration, workdir: environmentWorkdir, adapterConfig });
   }
 }

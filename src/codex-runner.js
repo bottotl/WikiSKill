@@ -152,7 +152,7 @@ const createCodexRunner = (config = {}) => {
   if (!Array.isArray(executableArgs) || executableArgs.some((value) => typeof value !== "string")) throw new Error("Codex runner executableArgs must be a string array.");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000) throw new Error("Codex runner timeoutMs must be an integer of at least 1000 milliseconds.");
 
-  return async ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema, launchRef }) => {
+  return async ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema, launchRef, isolation }) => {
     if (!model || typeof model.id !== "string" || !model.id.trim()) throw new Error("Codex runner requires a model id.");
     if (!Array.isArray(tools) || tools.some((tool) => tool !== "workspace")) throw new Error("Codex runner tools must be empty or workspace.");
     const taskTimeoutMs = tools.includes("workspace") && config.timeoutMs === undefined ? 600_000 : timeoutMs;
@@ -161,9 +161,12 @@ const createCodexRunner = (config = {}) => {
     const schemaPath = path.join(temporaryRoot, "prediction.schema.json");
     const outputPath = path.join(temporaryRoot, "prediction.json");
     await fs.writeFile(schemaPath, JSON.stringify({ ...PREDICTION_SCHEMA, properties: { prediction: predictionSchema || { type: "string" } } }));
+    const workspaceWrite = tools.includes("workspace") && config.readOnly !== true;
     const args = [
       ...executableArgs, "exec", "--ephemeral", "--skip-git-repo-check",
-      ...(tools.includes("workspace") ? ["--dangerously-bypass-approvals-and-sandbox"] : ["--sandbox", "read-only"]), "--json",
+      "--sandbox", workspaceWrite ? "workspace-write" : "read-only",
+      ...(workspaceWrite && isolation?.readerPort ? ["-c", "sandbox_workspace_write.network_access=true"] : []),
+      "--json",
       "-C", workdir, "--output-schema", schemaPath, "-o", outputPath,
       "-m", model.id.trim(),
       ...(config.reasoningEffort ? ["-c", `model_reasoning_effort=${JSON.stringify(config.reasoningEffort)}`] : []),
@@ -230,6 +233,8 @@ const createCodexRunner = (config = {}) => {
         return [];
       });
       return {
+        ...(isolation ? { isolationEvidence: { backend: "codex-workspace-write", privateReadDenied: false, brokerNetworkEnabled: workspaceWrite } } : {}),
+        ...(transcript.terminal.usage ? { usage: transcript.terminal.usage } : {}),
         prediction: structured.prediction,
         events,
         provider: { ref: "provider:codex", modelId: model.id.trim(), threadId: transcript.thread.thread_id }

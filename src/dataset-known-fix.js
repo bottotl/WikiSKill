@@ -32,14 +32,15 @@ const git = (cwd, args) => {
 
 const prepare = async (root, task) => {
   await fs.mkdir(root, { recursive: true });
-  await materialize(root, task.sandbox);
-  await prepareTaskDependencies(root, task.sandbox);
+  if (task.repositorySnapshot) await require("./repository-snapshot").materializeRepositorySnapshot(root, task.repositorySnapshot);
+  else await materialize(root, task.sandbox);
+  await prepareTaskDependencies(root, task.repositorySnapshot ? await require("./repository-snapshot").snapshotDependencyFiles(task.repositorySnapshot) : task.sandbox);
   git(root, ["init", "-q", "-b", "main"]);
   git(root, ["config", "user.email", "wikiskill@example.invalid"]);
   git(root, ["config", "user.name", "WikiSkill"]);
   await fs.writeFile(path.join(root, ".git", "info", "exclude"), "node_modules/\n");
   git(root, ["add", "."]);
-  git(root, ["commit", "--allow-empty", "-qm", "task baseline"]);
+  git(root, ["commit", "--allow-empty", "-qm", "初始化练习仓库"]);
 };
 
 const verifyKnownFixDataset = async (input) => {

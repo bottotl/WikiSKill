@@ -101,7 +101,7 @@ process.stdin.on("end", () => {
   const schema = JSON.parse(fs.readFileSync(valueAfter("--output-schema"), "utf8"));
   if (schema.properties.prediction.type !== "string") process.exit(42);
   fs.writeFileSync(valueAfter("-o"), JSON.stringify({prediction:{summary:"fixed"}}));
-  fs.writeFileSync(process.env.WIKISKILL_TEST_CAPTURE, JSON.stringify({args, prompt}));
+  fs.writeFileSync(process.env.WIKISKILL_TEST_CAPTURE, JSON.stringify({args, prompt, home:process.env.HOME, codexHome:process.env.CODEX_HOME || null}));
   for (const record of [
     {type:"thread.started",thread_id:"coding-thread"},
     {type:"turn.started"},
@@ -112,10 +112,14 @@ process.stdin.on("end", () => {
 });
 `);
   const runner = createCodexRunner({ executable: process.execPath, executableArgs: [script], env: { WIKISKILL_TEST_CAPTURE: capturePath }, timeoutMs: 10_000 });
-  const result = await runner({ systemPrompt: "coding", input: { task: "fix" }, workdir, tools: ["workspace"], model: { id: "model" } });
+  const result = await runner({ systemPrompt: "coding", input: { task: "fix" }, workdir, tools: ["workspace"], model: { id: "model" }, isolation: { readerPort: 43210 } });
   const capture = JSON.parse(await fs.readFile(capturePath, "utf8"));
-  assert.equal(capture.args.includes("--dangerously-bypass-approvals-and-sandbox"), true);
-  assert.equal(capture.args.includes("--sandbox"), false);
+  assert.equal(capture.args.includes("--dangerously-bypass-approvals-and-sandbox"), false);
+  assert.deepEqual(capture.args.slice(capture.args.indexOf("--sandbox"), capture.args.indexOf("--sandbox") + 2), ["--sandbox", "workspace-write"]);
+  assert.equal(capture.args.includes("sandbox_workspace_write.network_access=true"), true);
+  assert.equal(capture.home, process.env.HOME);
+  assert.equal(capture.codexHome, process.env.CODEX_HOME || null);
+  assert.deepEqual(result.isolationEvidence, { backend: "codex-workspace-write", privateReadDenied: false, brokerNetworkEnabled: true });
   assert.deepEqual(result.events.slice(0, 2), [
     { type: "tool_call", tool: "shell", input: { command: "node --test" } },
     { type: "tool_result", tool: "shell", output: "ok", exitCode: 0 }

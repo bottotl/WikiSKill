@@ -40,7 +40,7 @@ const createClaudeRunner = (config = {}) => {
   const timeoutMs = config.timeoutMs ?? 300_000;
   if (!Array.isArray(executableArgs) || executableArgs.some((item) => typeof item !== "string")) throw new Error("Claude runner executableArgs must be a string array.");
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000) throw new Error("Claude runner timeoutMs must be an integer of at least 1000 milliseconds.");
-  return ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema, launchRef, providerRole = "inference" }) => new Promise((resolve, reject) => {
+  const run = ({ systemPrompt, input, workdir, tools, model, abortSignal, environment, predictionSchema, launchRef, providerRole = "inference", preparedIsolation }) => new Promise((resolve, reject) => {
     if (!model || typeof model.id !== "string" || !model.id.trim()) return reject(new Error("Claude runner requires a model id."));
     if (!Array.isArray(tools) || tools.some((tool) => tool !== "workspace")) return reject(new Error("Claude runner tools must be empty or workspace."));
     if (abortSignal?.aborted) return reject(new Error("Claude runner aborted before launch."));
@@ -52,8 +52,8 @@ const createClaudeRunner = (config = {}) => {
     ].join("\n");
     const maxOutputBytes = development ? MAX_CODING_OUTPUT_BYTES : MAX_OUTPUT_BYTES;
     const taskTimeoutMs = development && config.timeoutMs === undefined ? 600_000 : timeoutMs;
-    const permissionArgs = development ? ["--dangerously-skip-permissions"] : ["--permission-mode", "dontAsk"];
-    const toolList = development ? "Bash,Edit,Read,Glob,Grep,Write" : "";
+    const permissionArgs = development && config.readOnly !== true ? ["--dangerously-skip-permissions"] : ["--permission-mode", "dontAsk"];
+    const toolList = development ? config.readOnly === true ? "Read,Glob,Grep" : "Bash,Edit,Read,Glob,Grep,Write" : "";
     const args = [...executableArgs, "-p", prompt, "--output-format", development ? "stream-json" : "json", ...(development ? ["--verbose"] : []), "--json-schema", outputSchema(predictionSchema), "--append-system-prompt", systemPrompt, "--model", model.id.trim(), ...(config.reasoningEffort ? ["--effort", config.reasoningEffort] : []), "--tools", toolList, ...permissionArgs, "--no-session-persistence"];
     let providerEnvironment;
     try {
@@ -66,7 +66,7 @@ const createClaudeRunner = (config = {}) => {
     } catch (error) {
       return reject(error);
     }
-    const child = spawn(executable, args, { cwd: workdir, env: providerEnvironment, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(preparedIsolation ? "/usr/bin/sandbox-exec" : executable, preparedIsolation ? ["-f", preparedIsolation.profilePath, preparedIsolation.binary, ...args] : args, { cwd: workdir, env: preparedIsolation?.environment ?? providerEnvironment, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let outputBytes = 0;
@@ -99,9 +99,18 @@ const createClaudeRunner = (config = {}) => {
         }
       } catch (error) { return reject(new Error(`Claude runner returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`)); }
       if (result?.subtype !== "success" || result.is_error !== false || result.terminal_reason !== "completed" || typeof result.session_id !== "string" || !result.structured_output || typeof result.structured_output !== "object" || !Object.hasOwn(result.structured_output, "prediction")) return reject(new Error("Claude runner result does not match the verified structured output contract."));
-      return resolve({ prediction: result.structured_output.prediction, events, provider: { ref: "provider:claude", modelId: model.id.trim(), sessionId: result.session_id } });
+      return resolve({ ...(preparedIsolation ? { isolationEvidence: preparedIsolation.isolationEvidence } : {}), prediction: result.structured_output.prediction, ...(result.usage ? { usage: result.usage } : {}), events, provider: { ref: "provider:claude", modelId: model.id.trim(), sessionId: result.session_id } });
     }));
   });
+  return async input => {
+    if (!input.isolation) return run(input);
+    const fs = require("node:fs/promises"); const path = require("node:path");
+    const temporaryRoot = await fs.mkdtemp(path.join(require("node:os").tmpdir(), "wikiskill-claude-isolated-"));
+    try {
+      const prepared = await require("./inference-isolation").prepareIsolatedCommand({ executable, args: [], workdir: input.workdir, environment: createCleanProviderEnvironment(process.env, input.environment, config.env), isolation: input.isolation, temporaryRoot, provider: "claude" });
+      return await run({ ...input, preparedIsolation: { profilePath: prepared.args[1], binary: prepared.args[2], environment: prepared.environment, isolationEvidence: prepared.isolationEvidence } });
+    } finally { await fs.rm(temporaryRoot, { recursive: true, force: true }); }
+  };
 };
 
 module.exports = { createClaudeRunner };

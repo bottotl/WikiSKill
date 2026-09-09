@@ -51,8 +51,8 @@ test("built-in Claude learning descriptor digests its complete shipped implement
 test("built-in Codex runner is sealed under the exact provider ref with its implementation digest", () => {
   const registry = createBuiltinCapabilityRegistry();
   const descriptor = registry.snapshot().find((item) => item.ref === "provider:codex");
-  const source = fs.readFileSync(path.join(__dirname, "..", "src", "codex-runner.js"));
-  const expected = `sha256:${crypto.createHash("sha256").update(Buffer.concat([source, Buffer.from("\0")])).digest("hex")}`;
+  const sources = ["codex-runner.js", "clean-environment.js"].flatMap(file => [fs.readFileSync(path.join(__dirname, "..", "src", file)), Buffer.from("\0")]);
+  const expected = `sha256:${crypto.createHash("sha256").update(Buffer.concat(sources)).digest("hex")}`;
 
   assert.equal(runnerRefForProvider("codex"), "provider:codex");
   assert.equal(learningRefForProvider("codex"), "builtin:codex-cli-v1");

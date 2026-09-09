@@ -86,11 +86,11 @@ async function inspectEvolutionBaseline(workspaceInput, targetSkill, { empty = f
   };
 }
 
-const initializeSourceRepo = async (workspace, sourceRoot, { empty = false } = {}) => {
+const initializeSourceRepo = async (workspace, sourceRoot, { empty = false, retainContextSkills = false } = {}) => {
   await fs.mkdir(sourceRoot, { recursive: true });
   const skillsRoot = path.join(sourceRoot, ".wikiskill", "skills");
   await fs.mkdir(skillsRoot, { recursive: true });
-  if (!empty) await copyTree(path.join(workspace, ".wikiskill", "skills"), skillsRoot);
+  if (!empty || retainContextSkills) await copyTree(path.join(workspace, ".wikiskill", "skills"), skillsRoot);
   await copyTree(path.join(workspace, ".wikiskill", "wiki"), path.join(sourceRoot, ".wikiskill", "wiki"));
   execFileSync("git", ["init", "-q", "-b", "main", sourceRoot]);
   execFileSync("git", ["-C", sourceRoot, "config", "user.email", "wikiskill@example.invalid"]);
@@ -254,7 +254,7 @@ const initializeTaskRepository = async (workdir, sandbox) => {
   execFileSync("git", ["config", "user.name", "WikiSkill"], { cwd: workdir });
   await fs.writeFile(path.join(workdir, ".git", "info", "exclude"), "node_modules/\n");
   execFileSync("git", ["add", "."], { cwd: workdir });
-  execFileSync("git", ["commit", "--allow-empty", "-qm", "task baseline"], { cwd: workdir });
+  execFileSync("git", ["commit", "--allow-empty", "-qm", "初始化练习仓库"], { cwd: workdir });
   return workdir;
 };
 
@@ -337,6 +337,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     const runnerRef = runnerRefForProvider(selection.cohort.provider);
     runtimeRunnerFrozenConfig = {
       ...(evolution.runtime?.runnerConfig || {}),
+      ...(options.runnerTimeoutMs === undefined ? {} : { timeoutMs: Number(options.runnerTimeoutMs) }),
       reasoningEffort
     };
     const resolvedRunner = registry.resolveRunner(runnerRef, {
@@ -347,7 +348,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     runtime = { runnerRef, scorerRef: selection.cohort.scorerRef, provider: selection.cohort.provider, modelId: selection.cohort.modelId, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches }, runner: resolvedRunner.descriptor, scorer: resolvedScorer.descriptor };
     runtimeRunner = resolvedRunner.run;
     runtimeAdapter = {
-      prepareEnvironment: ({ workdir, task }) => runtime.scorerRef === "builtin:command-exit-v1" ? initializeTaskRepository(workdir, task.sandbox) : workdir,
+      prepareEnvironment: async ({ workdir, task }) => runtime.scorerRef === "builtin:command-exit-v1" ? initializeTaskRepository(workdir, task.repositorySnapshot ? await require("./repository-snapshot").snapshotDependencyFiles(task.repositorySnapshot) : task.sandbox) : workdir,
       resolveTools: () => runtime.toolProfile === "workspace" ? ["workspace"] : [],
       disposeEnvironment: ({ workdir }) => runtime.scorerRef === "builtin:command-exit-v1" ? fs.rm(workdir, { recursive: true, force: true }) : undefined,
       score: ({ task, prediction, groundTruth, environment, workdir, split, iteration }) => {
@@ -426,7 +427,8 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
   options.onEvent?.({ schema: "wikiskill.event.v1", type: "evolution.launch-budget-selected", runId, budget: launchBudget.snapshot(), estimatedProviderLaunches });
   if (Object.values(frozenComponents).some((value) => !SHA256.test(value))) throw new Error("Evolution component digest could not be frozen.");
   const sourceRoot = path.join(stateRoot, "workspaces", config.workspaceId, "evolutions", runId, "source");
-  await initializeSourceRepo(workspace, sourceRoot, { empty: options.empty === true });
+  const retainContextSkills = tasks.some(task => task.knowledge !== undefined);
+  await initializeSourceRepo(workspace, sourceRoot, { empty: options.empty === true, retainContextSkills });
   const baselineSkillDigest = options.empty ? null : await treeDigest(path.join(sourceRoot, ".wikiskill", "skills", targetSkill));
   const baselineWikiDigest = await treeDigest(path.join(sourceRoot, ".wikiskill", "wiki"));
   try {
@@ -445,7 +447,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     repo: sourceRoot,
     skillRoots: [".wikiskill/skills"],
     targetSkills: options.empty ? [] : [targetSkill],
-    contextSkills: options.empty ? [] : allSkillDirectories.filter((id) => id !== targetSkill),
+    contextSkills: options.empty && !retainContextSkills ? [] : allSkillDirectories.filter((id) => id !== targetSkill),
     ...(options.empty ? { mode: "empty", newSkillRoot: ".wikiskill/skills", newSkillIds: [targetSkill] } : {}),
     dataset: { ...explicit.dataset, adapter: { source: "explicit-file", digest: explicit.dataset.digest } },
     stateRoot: path.join(stateRoot, "engine"),
@@ -520,7 +522,9 @@ async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
       if (runtimeEvidence?.schema !== "wikiskill.runtime-evidence.v2" || runtimeEvidence.runId !== runId) throw new Error("WikiSkill runtime evidence identity is invalid.");
     }
   }
-  return { runId, manifest: status.manifest, state: status.state, ...(result ? { result } : {}), ...(runtimeEvidence ? { runtimeEvidence } : {}) };
+  const runtime = status.manifest.runtime;
+  const launchBudget = runtime?.launchBudget ? createProviderLaunchBudget({ root: path.join(root, "workspaces", config.workspaceId, "evolutions", runId, "accounting"), runId, provider: runtime.provider, modelId: runtime.modelId, reasoningEffort: runtime.reasoningEffort, limit: runtime.launchBudget.limit }).snapshot() : undefined;
+  return { runId, ...(launchBudget ? { launchBudget } : {}), manifest: status.manifest, state: status.state, ...(result ? { result } : {}), ...(runtimeEvidence ? { runtimeEvidence } : {}) };
 }
 
 module.exports = { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution };

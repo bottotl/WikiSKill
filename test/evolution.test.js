@@ -532,7 +532,11 @@ test("public empty mode creates, applies, and rolls back the first Skill", async
 test("explicit dataset resolves runner, scorer, and learning roles from the runtime registry", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   const registry = createCapabilityRegistry();
-  registry.registerRunner({ ref: "provider:claude", apiVersion: "wikiskill.runner.v1", implementationVersion: "test", implementationDigest: `sha256:${"a".repeat(64)}` }, () => runner);
+  let runnerConfig;
+  registry.registerRunner({ ref: "provider:claude", apiVersion: "wikiskill.runner.v1", implementationVersion: "test", implementationDigest: `sha256:${"a".repeat(64)}` }, (config) => {
+    runnerConfig = config;
+    return runner;
+  });
   registry.registerScorer({ ref: "scorer:test", apiVersion: "wikiskill.scorer.v1", implementationVersion: "test", implementationDigest: `sha256:${"b".repeat(64)}` }, () => ({ prediction, privateInput }) => ({ score: prediction.value === privateInput.expected ? 1 : 0, evidence: { matched: true } }));
   registry.registerLearningAgent({ ref: "provider:claude-learning", apiVersion: "wikiskill.learning-agent.v1", implementationVersion: "test", implementationDigest: `sha256:${"c".repeat(64)}` }, () => ({ maintainer, proposer }));
   registry.seal();
@@ -544,11 +548,13 @@ test("explicit dataset resolves runner, scorer, and learning roles from the runt
     stateRoot,
     runId: "explicit-registry",
     capabilityRegistry: registry,
-    iterationLimit: 1
+    iterationLimit: 1,
+    runnerTimeoutMs: "1200000"
   });
   assert.equal(result.state.bestValidationScore, 1);
   assert.equal(result.candidate.runtime.runnerRef, "provider:claude");
   assert.equal(result.candidate.runtime.scorerRef, "scorer:test");
+  assert.equal(runnerConfig.timeoutMs, 1_200_000);
   const runtimeEvidence = JSON.parse(await fs.readFile(path.join(result.runRoot, "result", "runtime-evidence.json"), "utf8"));
   assert.deepEqual(runtimeEvidence.cohort, { provider: "claude", modelId: "test-model", reasoningEffort: "unspecified", scorerRef: "scorer:test", toolProfile: "none" });
 });
