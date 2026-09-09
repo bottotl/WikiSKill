@@ -37,7 +37,8 @@ const main = async () => {
   try {
     const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8", env });
     assert.equal(help.status, 0);
-    assert.match(help.stdout, /evolve .*--dataset/u);
+    assert.match(help.stdout, /experiment prepare .*--dataset/u);
+    assert.match(help.stdout, /evolve --experiment/u);
     assert.doesNotMatch(help.stdout, /foreground|episode|dataset create|fixture-evolve/u);
 
     const preview = invoke(["init", workspace, "--mode", "zero-source-write", "--dry-run", "--json"], env)[0];
@@ -57,21 +58,14 @@ const main = async () => {
     const datasetPath = path.join(fixtureRoot, "dataset.json");
     const fixtureDataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
     assert.deepEqual(Object.fromEntries(["train", "val", "test"].map((split) => [split, fixtureDataset.tasks.filter((task) => task.split === split).length])), { train: 4, val: 2, test: 2 });
-    const datasetDigest = invoke(["dataset", "validate", "--dataset", datasetPath, "--scorer", "scorer:fixture", "--json"], env)[0].data.digest;
-    const baselineState = invoke(["evolution", "baseline", "--workspace", workspace, "--target", "target-skill", "--json"], env)[0].data;
+    const prepared = invoke(["experiment", "prepare", "--workspace", workspace, "--target", "target-skill", "--dataset", datasetPath, "--scorer", "scorer:fixture", "--json"], env)[0];
+    const experimentPath = path.join(root, "experiment.json");
+    await fs.writeFile(experimentPath, JSON.stringify(prepared));
     const events = invoke([
-      "evolve", "--workspace", workspace,
-      "--expected-workspace-id", baselineState.workspaceId,
-      "--target", "target-skill",
-      "--dataset", datasetPath,
-      "--expected-dataset-digest", datasetDigest,
-      "--expected-target-skill-digest", baselineState.targetSkillDigest,
-      "--expected-active-skill-set-digest", baselineState.activeSkillSetDigest,
-      "--expected-wiki-digest", baselineState.wikiDigest,
+      "evolve", "--experiment", experimentPath,
       "--provider", "claude",
       "--model", "fixture-model",
       "--reasoning-effort", "low",
-      "--scorer", "scorer:fixture",
       "--tool-profile", "none",
       "--iterations", "2",
       "--max-provider-launches", "24",

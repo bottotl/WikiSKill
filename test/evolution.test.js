@@ -247,22 +247,24 @@ const writeModules = async (workspace) => {
 test("public CLI runs an explicit dataset without creating dataset views", async () => {
   const { workspace, stateRoot, datasetPath } = await setup();
   await configureEvolution(workspace, { ...await writeModules(workspace), iterationLimit: 4 });
-  const datasetDigest = await digestForDataset(datasetPath);
-  const baseline = await baselineFor(workspace, "target-skill");
-  const output = [];
-  const code = await execute([
-    "evolve", "--workspace", workspace,
-    "--expected-workspace-id", baseline.workspaceId,
+  const prepared = [];
+  const prepareCode = await execute([
+    "experiment", "prepare",
+    "--workspace", workspace,
     "--target", "target-skill",
     "--dataset", datasetPath,
-    "--expected-dataset-digest", datasetDigest,
-    "--expected-target-skill-digest", baseline.targetSkillDigest,
-    "--expected-active-skill-set-digest", baseline.activeSkillSetDigest,
-    "--expected-wiki-digest", baseline.wikiDigest,
+    "--scorer", "scorer:test",
+    "--json"
+  ], { stdout: (line) => prepared.push(line), stderr: () => {} });
+  assert.equal(prepareCode, 0, prepared.join(""));
+  const experimentPath = path.join(workspace, "experiment.json");
+  await fs.writeFile(experimentPath, prepared.join(""));
+  const output = [];
+  const code = await execute([
+    "evolve", "--experiment", experimentPath,
     "--provider", "claude",
     "--model", "test-model",
     "--reasoning-effort", "low",
-    "--scorer", "scorer:test",
     "--tool-profile", "none",
     "--iterations", "4",
     "--max-provider-launches", "100",

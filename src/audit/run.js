@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 "use strict";
 
 const crypto = require("node:crypto");
@@ -6,21 +5,6 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
-
-const parseArgs = (argv) => {
-  const options = { json: false };
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === "--json") options.json = true;
-    else if (arg === "--run-root") options.runRoot = argv[++index];
-    else if (arg === "--workspace") options.workspace = argv[++index];
-    else throw new Error(`Unknown option: ${arg}`);
-  }
-  if (!options.runRoot) throw new Error("--run-root is required");
-  if (!options.workspace) throw new Error("--workspace is required");
-  return options;
-};
-
 const readJson = (target) => JSON.parse(fs.readFileSync(target, "utf8"));
 const sha256 = (value) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
 
@@ -51,9 +35,8 @@ const auditRun = (runRoot, { workspace } = {}) => {
     const expectedRawRef = `.wikiskill/raw/evolutions/${manifest.runId}`;
     if (manifest.rawReferencePrefix !== expectedRawRef) blockers.push("Run manifest has an invalid Raw authority reference.");
     else {
-      const authorityRoot = path.join(path.resolve(workspace), expectedRawRef);
       try {
-        const authorityManifest = readJson(path.join(authorityRoot, "manifest.json"));
+        const authorityManifest = readJson(path.join(path.resolve(workspace), expectedRawRef, "manifest.json"));
         const receipt = readJson(path.join(runRoot, "result", "raw-authority.json"));
         if (authorityManifest.schema !== "wikiskill.evolution-raw.v1" || authorityManifest.runId !== manifest.runId || !SHA256.test(authorityManifest.rawDigest || "")) blockers.push("Persisted Raw authority manifest is invalid.");
         if (receipt.schema !== "wikiskill.raw-authority-receipt.v1" || receipt.runId !== manifest.runId || receipt.rawRef !== expectedRawRef || receipt.rawDigest !== authorityManifest.rawDigest) blockers.push("Terminal Raw authority receipt does not match its manifest.");
@@ -77,9 +60,7 @@ const auditRun = (runRoot, { workspace } = {}) => {
 
   const runtimeSessions = state.runtimeSessions || [];
   const phaseSplits = { baseline_validation: "val", training: "train", candidate_validation: "val", baseline_test: "test", final_test: "test" };
-
-  const traceFiles = visitJson(path.join(runRoot, "raw", "traces"));
-  const traces = traceFiles.map(readJson);
+  const traces = visitJson(path.join(runRoot, "raw", "traces")).map(readJson);
   if (new Set(traces.map((trace) => trace.id)).size !== traces.length) blockers.push("Raw trajectories contain duplicate ids across iterations or attempts.");
   for (const trace of traces) if (phaseSplits[trace.phase] !== trace.split) blockers.push(`${trace.id}: trajectory phase ${String(trace.phase)} does not match split ${String(trace.split)}.`);
   const traceById = new Map(traces.map((trace) => [trace.id, trace]));
@@ -89,9 +70,8 @@ const auditRun = (runRoot, { workspace } = {}) => {
   let testPhaseStarted = false;
   for (const invocation of inferenceInvocations) {
     if (phaseSplits[invocation.phase] !== invocation.split) blockers.push(`${invocation.launchRef}: inference phase ${String(invocation.phase)} does not match split ${String(invocation.split)}.`);
-    if (invocation.phase === "baseline_test" || invocation.phase === "final_test") {
-      testPhaseStarted = true;
-    } else if (testPhaseStarted) blockers.push(`${invocation.launchRef}: non-test inference ran after final test evaluation started.`);
+    if (invocation.phase === "baseline_test" || invocation.phase === "final_test") testPhaseStarted = true;
+    else if (testPhaseStarted) blockers.push(`${invocation.launchRef}: non-test inference ran after final test evaluation started.`);
   }
 
   let best = state.baselineValidationScore;
@@ -140,20 +120,4 @@ const auditRun = (runRoot, { workspace } = {}) => {
   };
 };
 
-const main = () => {
-  try {
-    const options = parseArgs(process.argv.slice(2));
-    const runRoot = path.resolve(options.runRoot);
-    const result = auditRun(runRoot, { workspace: path.resolve(options.workspace) });
-    const output = { schema: "wikiskill.run-audit.v1", success: result.blockers.length === 0, data: result.data, warnings: result.warnings, blockers: result.blockers, nextActions: result.blockers.length ? ["Resolve the run evidence blockers before candidate publication."] : [] };
-    process.stdout.write(`${JSON.stringify(output, null, options.json ? 2 : 0)}\n`);
-    process.exitCode = output.success ? 0 : 1;
-  } catch (error) {
-    process.stdout.write(`${JSON.stringify({ schema: "wikiskill.run-audit.v1", success: false, data: null, warnings: [], blockers: [error instanceof Error ? error.message : String(error)], nextActions: [] })}\n`);
-    process.exitCode = 1;
-  }
-};
-
-if (require.main === module) main();
-
-module.exports = { auditRun, parseArgs };
+module.exports = { auditRun };

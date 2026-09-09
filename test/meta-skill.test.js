@@ -7,8 +7,9 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const test = require("node:test");
 
-const { audit } = require("../skills/wikiskill-evolution/scripts/audit-experiment");
-const { auditRun } = require("../skills/wikiskill-evolution/scripts/audit-run");
+const { auditExperiment } = require("../src/audit/experiment");
+const { auditRun } = require("../src/audit/run");
+const { validateDataset } = require("../src");
 
 const exactTask = (id, split, instruction) => ({
   id,
@@ -18,29 +19,28 @@ const exactTask = (id, split, instruction) => ({
   evaluator: { capabilityRef: "builtin:exact-output-v1" }
 });
 
-test("bundled evolution Skill ships every routed resource", () => {
+test("bundled evolution Skill ships its routed references without executable audit logic", () => {
   const root = path.join(__dirname, "..", "skills", "wikiskill-evolution");
   for (const relative of [
     "SKILL.md",
     "references/evolution-guidelines.md",
-    "references/host-integration.md",
-    "scripts/audit-experiment.js",
-    "scripts/audit-run.js"
+    "references/host-integration.md"
   ]) assert.equal(fs.statSync(path.join(root, relative)).isFile(), true, relative);
   const manifest = require("../package.json");
   assert.equal(manifest.files.includes("skills"), true);
 });
 
 test("experiment audit accepts a structurally valid smoke and reports sample-size warnings", () => {
-  const result = audit({
-    dataset: {
+  const dataset = validateDataset({
       schema: "wikiskill.dataset.v1",
       tasks: [
         exactTask("train-1", "train", "Diagnose build log A."),
         exactTask("val-1", "val", "Diagnose build log B."),
         exactTask("test-1", "test", "Diagnose build log C.")
       ]
-    },
+    });
+  const result = auditExperiment({
+    tasks: dataset.tasks,
     targetSkill: "repo-validation",
     mode: "smoke"
   });
@@ -62,15 +62,16 @@ test("experiment audit remains domain-agnostic for scorer-specific task fields",
     "adapter.test.js",
     "README.md"
   ];
-  const result = audit({
-    dataset: {
+  const dataset = validateDataset({
       schema: "wikiskill.dataset.v1",
       tasks: [
         train,
         exactTask("val-1", "val", "Perform domain validation."),
         exactTask("test-1", "test", "Perform held-out validation.")
       ]
-    },
+    });
+  const result = auditExperiment({
+    tasks: dataset.tasks,
     targetSkill: "repo-validation",
     mode: "smoke"
   });
@@ -78,20 +79,20 @@ test("experiment audit remains domain-agnostic for scorer-specific task fields",
   assert.equal(result.warnings.some((warning) => /allowedPaths|target Skill/u.test(warning)), false);
 });
 
-test("experiment audit CLI returns a stable nonzero blocker envelope", () => {
+test("official experiment audit CLI returns a stable nonzero blocker envelope", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-meta-skill-"));
   const datasetPath = path.join(root, "dataset.json");
   fs.writeFileSync(datasetPath, JSON.stringify({ schema: "wikiskill.dataset.v1", tasks: [] }));
   const result = spawnSync(process.execPath, [
-    path.join(__dirname, "..", "skills", "wikiskill-evolution", "scripts", "audit-experiment.js"),
-    "--dataset", datasetPath,
-    "--target-skill", "repo-validation",
+    path.join(__dirname, "..", "bin", "wikiskill"),
+    "experiment", "audit", "--dataset", datasetPath,
+    "--target", "repo-validation",
     "--mode", "smoke",
     "--json"
   ], { encoding: "utf8" });
   assert.equal(result.status, 1);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.schema, "wikiskill.experiment-audit.v1");
+  assert.equal(output.data, null);
   assert.equal(output.success, false);
   assert.equal(output.blockers.length, 4);
 });
@@ -119,15 +120,16 @@ test("publishable audit requires and validates the complete active Skill context
   ];
   const bundleDigest = `sha256:${require("node:crypto").createHash("sha256").update(`${JSON.stringify(inventory, null, 2)}\n`).digest("hex")}`;
   const workspaceId = "workspace-1";
-  const result = audit({
-    dataset: {
+  const dataset = validateDataset({
       schema: "wikiskill.dataset.v1",
       tasks: [
         exactTask("train-1", "train", "Perform domain task A."),
         exactTask("val-1", "val", "Perform domain task B."),
         exactTask("test-1", "test", "Perform domain task C.")
       ]
-    },
+    });
+  const result = auditExperiment({
+    tasks: dataset.tasks,
     targetSkill: "repo-validation",
     mode: "publishable",
     skillContext: {

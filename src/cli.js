@@ -12,13 +12,15 @@ wikiskill context skill-get --workspace <workspace> --context <id> --skill <id> 
 wikiskill context receipt --workspace <workspace> --context <id> --skill <id> --json
 wikiskill context receipts --workspace <workspace> --context <id> --json
 wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empty] --json
+wikiskill experiment prepare --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> [--empty] --json
 wikiskill experiment audit --dataset <dataset.json> --target <skill-id> [--skill-context <context.json>] [--baseline <baseline.json>] [--mode publishable|smoke] [--empty] --json
+wikiskill experiment audit --experiment <experiment.json> --json
 wikiskill run audit --run-root <run-root> --workspace <workspace> --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
 wikiskill dataset verify-known-fix --dataset <dataset.json> --scorer <ref> --patch <changes.patch> --json
-wikiskill evolve --workspace <workspace> --expected-workspace-id <id> --target <skill-id> --dataset <dataset.json> --expected-dataset-digest <sha256> [--expected-target-skill-digest <sha256>] --expected-active-skill-set-digest <sha256> --expected-wiki-digest <sha256> --provider codex|claude --model <id> --reasoning-effort <level> --scorer <ref> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--runner-timeout-ms <ms>] [--empty] [--run-id <id>] --json-events
+wikiskill evolve --experiment <experiment.json> --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--runner-timeout-ms <ms>] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
 wikiskill candidate diff --workspace <workspace> --candidate <id> --json
@@ -30,7 +32,7 @@ const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   evolution: new Set(["baseline"]),
-  experiment: new Set(["audit"]),
+  experiment: new Set(["prepare", "audit"]),
   run: new Set(["audit"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate", "verify-known-fix", "compile-commit", "recommend-commit"]),
@@ -44,6 +46,7 @@ const VALUE_FLAGS = Object.freeze({
   "--mode": "mode",
   "--input": "input",
   "--dataset": "datasetPath",
+  "--experiment": "experimentPath",
   "--skill-context": "skillContextPath",
   "--baseline": "baselinePath",
   "--run-root": "runRoot",
@@ -122,6 +125,23 @@ const runEvolutionCommand = async (options, io, abortSignal, onRunId) => {
   return core.evolveWorkspace(options.workspace, options.target, runOptions);
 };
 
+const validateDatasetFile = async (datasetPathInput, scorerRef) => {
+  const datasetPath = path.resolve(datasetPathInput);
+  const dataset = core.validateDataset(JSON.parse(await fs.readFile(datasetPath, "utf8")));
+  if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== scorerRef)) throw new Error("Every dataset task evaluator must match --scorer.");
+  const { validateBuiltinScorerInput } = require("./runtime-capabilities");
+  for (const task of dataset.tasks) validateBuiltinScorerInput(scorerRef, task.groundTruth);
+  return { datasetPath, dataset };
+};
+
+const readExperiment = async (input) => {
+  const experimentPath = path.resolve(input);
+  const parsed = JSON.parse(await fs.readFile(experimentPath, "utf8"));
+  const experiment = parsed?.success === true && parsed.data ? parsed.data : parsed;
+  if (experiment?.schema !== "wikiskill.experiment.v1") throw new Error("Experiment artifact schema must be wikiskill.experiment.v1.");
+  return { experimentPath, experiment };
+};
+
 async function execute(argv, io = { stdout: process.stdout.write.bind(process.stdout), stderr: process.stderr.write.bind(process.stderr) }) {
   let emittedRunId;
   try {
@@ -130,6 +150,23 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       return argv.length ? 0 : 1;
     }
     const options = parse(argv);
+    if (options.command === "evolve" && options.experimentPath) {
+      const conflicts = ["workspace", "target", "datasetPath", "scorerRef", "expectedWorkspaceId", "expectedDatasetDigest", "expectedTargetSkillDigest", "expectedActiveSkillSetDigest", "expectedWikiDigest"].filter((key) => options[key] !== undefined);
+      if (conflicts.length) throw new Error("evolve --experiment cannot be combined with explicit experiment authority flags.");
+      const { experiment } = await readExperiment(options.experimentPath);
+      Object.assign(options, {
+        workspace: experiment.workspace,
+        target: experiment.targetSkill,
+        datasetPath: experiment.datasetPath,
+        scorerRef: experiment.scorerRef,
+        empty: experiment.empty === true,
+        expectedWorkspaceId: experiment.baseline?.workspaceId,
+        expectedDatasetDigest: experiment.datasetDigest,
+        expectedTargetSkillDigest: experiment.baseline?.targetSkillDigest ?? undefined,
+        expectedActiveSkillSetDigest: experiment.baseline?.activeSkillSetDigest,
+        expectedWikiDigest: experiment.baseline?.wikiDigest
+      });
+    }
     if (!options.json && !options.jsonEvents) throw new Error("Commands require --json (or --json-events for evolve).");
     let data;
     if (options.command === "init") data = await core.initWorkspace(options.workspace, options);
@@ -169,24 +206,58 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       if (options.subcommand !== "baseline") throw new Error("Only `evolution baseline` is supported.");
       data = await core.inspectEvolutionBaseline(options.workspace, options.target, { empty: options.empty === true });
     } else if (options.command === "experiment") {
-      if (options.subcommand !== "audit" || !options.datasetPath || !options.target) throw new Error("experiment audit requires --dataset and --target.");
-      const datasetPath = path.resolve(options.datasetPath);
-      const skillContextPath = options.skillContextPath ? path.resolve(options.skillContextPath) : undefined;
-      const baselinePath = options.baselinePath ? path.resolve(options.baselinePath) : undefined;
-      const audit = require("../skills/wikiskill-evolution/scripts/audit-experiment").audit;
-      const result = audit({
-        dataset: JSON.parse(await fs.readFile(datasetPath, "utf8")),
-        targetSkill: options.target,
-        skillContext: skillContextPath ? JSON.parse(await fs.readFile(skillContextPath, "utf8")) : null,
-        baseline: baselinePath ? JSON.parse(await fs.readFile(baselinePath, "utf8")) : null,
-        mode: options.mode || "publishable",
-        empty: options.empty === true
+      const auditExperiment = require("./audit/experiment").auditExperiment;
+      if (options.subcommand === "prepare") {
+        if (!options.workspace || !options.datasetPath || !options.target || !options.scorerRef) throw new Error("experiment prepare requires --workspace, --dataset, --target, and --scorer.");
+        const { datasetPath, dataset } = await validateDatasetFile(options.datasetPath, options.scorerRef);
+        const skillContext = await core.prepareContext(options.workspace);
+        const baseline = await core.inspectEvolutionBaseline(options.workspace, options.target, { empty: options.empty === true });
+        const result = auditExperiment({ tasks: dataset.tasks, targetSkill: options.target, skillContext, baseline, mode: "publishable", empty: options.empty === true });
+        data = { schema: "wikiskill.experiment.v1", workspace: path.resolve(options.workspace), datasetPath, datasetDigest: dataset.digest, scorerRef: options.scorerRef, targetSkill: options.target, empty: options.empty === true, skillContext, baseline, preparedAt: new Date().toISOString() };
+        return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the experiment preparation blockers and prepare a new artifact."] : []), result.blockers.length ? 1 : 0, io);
+      }
+      if (options.subcommand !== "audit") throw new Error("Only `experiment prepare` and `experiment audit` are supported.");
+      let datasetPath;
+      let dataset;
+      let targetSkill;
+      let skillContext;
+      let baseline;
+      let mode = options.mode || "publishable";
+      let empty = options.empty === true;
+      let experimentPath;
+      if (options.experimentPath) {
+        const loaded = await readExperiment(options.experimentPath);
+        experimentPath = loaded.experimentPath;
+        const experiment = loaded.experiment;
+        ({ datasetPath, dataset } = await validateDatasetFile(experiment.datasetPath, experiment.scorerRef));
+        if (dataset.digest !== experiment.datasetDigest) throw new Error("Experiment dataset digest differs from the prepared artifact.");
+        targetSkill = experiment.targetSkill;
+        skillContext = experiment.skillContext;
+        baseline = experiment.baseline;
+        empty = experiment.empty === true;
+      } else {
+        if (!options.datasetPath || !options.target) throw new Error("experiment audit requires --experiment or --dataset and --target.");
+        datasetPath = path.resolve(options.datasetPath);
+        dataset = core.validateDataset(JSON.parse(await fs.readFile(datasetPath, "utf8")));
+        targetSkill = options.target;
+        const skillContextPath = options.skillContextPath ? path.resolve(options.skillContextPath) : undefined;
+        const baselinePath = options.baselinePath ? path.resolve(options.baselinePath) : undefined;
+        skillContext = skillContextPath ? JSON.parse(await fs.readFile(skillContextPath, "utf8")) : null;
+        baseline = baselinePath ? JSON.parse(await fs.readFile(baselinePath, "utf8")) : null;
+      }
+      const result = auditExperiment({
+        tasks: dataset.tasks,
+        targetSkill,
+        skillContext,
+        baseline,
+        mode,
+        empty
       });
-      data = { schema: "wikiskill.experiment-audit.v1", datasetPath, targetSkill: options.target, mode: options.mode || "publishable", splitCounts: result.splitCounts, ...(skillContextPath ? { skillContextPath } : {}), ...(baselinePath ? { baselinePath } : {}) };
+      data = { schema: "wikiskill.experiment-audit.v1", datasetPath, targetSkill, mode, splitCounts: result.splitCounts, ...(experimentPath ? { experimentPath } : {}) };
       return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve every blocker, then rerun the canonical dataset validation and experiment audit."] : []), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "run") {
       if (options.subcommand !== "audit" || !options.runRoot || !options.workspace) throw new Error("run audit requires --run-root and --workspace.");
-      const result = require("../skills/wikiskill-evolution/scripts/audit-run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace) });
+      const result = require("./audit/run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace) });
       data = { schema: "wikiskill.run-audit.v1", ...result.data };
       return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the run evidence blockers before candidate publication."] : []), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "bootstrap") {
@@ -205,13 +276,10 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       } else if (options.subcommand !== "validate") throw new Error("Only `dataset validate` and `dataset verify-known-fix` are supported.");
       else {
       if (!options.datasetPath || !options.scorerRef) throw new Error("dataset validate requires --dataset and --scorer.");
-      const dataset = core.validateDataset(JSON.parse(await fs.readFile(path.resolve(options.datasetPath), "utf8")));
-      if (dataset.tasks.some((task) => task.evaluator.capabilityRef !== options.scorerRef)) throw new Error("Every dataset task evaluator must match --scorer.");
-      const { validateBuiltinScorerInput } = require("./runtime-capabilities");
-      for (const task of dataset.tasks) validateBuiltinScorerInput(options.scorerRef, task.groundTruth);
+      const { datasetPath, dataset } = await validateDatasetFile(options.datasetPath, options.scorerRef);
       data = {
         schema: "wikiskill.dataset-validation.v1",
-        datasetPath: path.resolve(options.datasetPath),
+        datasetPath,
         digest: dataset.digest,
         scorerRef: options.scorerRef,
         splitCounts: Object.fromEntries(["train", "val", "test"].map((split) => [split, dataset.tasks.filter((task) => task.split === split).length]))
