@@ -86,11 +86,12 @@ async function main(argv = process.argv.slice(2)) {
       return summary;
     }
 
-    const prepared = invoke(["experiment", "prepare", "--workspace", workspace, "--target", targetSkill, "--dataset", datasetPath, "--scorer", "builtin:command-exit-v1", "--json"], env).at(-1);
-    const experimentPath = path.join(outputRoot, "experiment.json");
-    await fs.writeFile(experimentPath, `${JSON.stringify(prepared, null, 2)}\n`, "utf8");
-    const evolution = invoke([
-      "evolve", "--experiment", experimentPath,
+    const events = invoke([
+      "experiment", "run",
+      "--workspace", workspace,
+      "--target", targetSkill,
+      "--dataset", datasetPath,
+      "--scorer", "builtin:command-exit-v1",
       "--provider", "codex",
       "--model", options.model,
       "--reasoning-effort", "low",
@@ -99,9 +100,12 @@ async function main(argv = process.argv.slice(2)) {
       "--max-provider-launches", "100",
       "--run-id", runId,
       "--json-events"
-    ], env).at(-1);
-    const result = evolution?.type === "evolution.result" ? evolution.data : null;
-    if (!result) throw new Error("evolve did not emit an evolution.result event.");
+    ], env);
+    const prepared = events.find((event) => event.type === "experiment.prepared");
+    const completed = events.at(-1);
+    const result = completed?.type === "experiment.result" ? completed.data.evolution : null;
+    if (!prepared || !result) throw new Error("experiment run did not emit prepared and result events.");
+    await fs.writeFile(path.join(outputRoot, "experiment.json"), `${JSON.stringify(prepared.data, null, 2)}\n`, "utf8");
     const status = invoke(["status", "--workspace", workspace, "--run", runId, "--json"], env).at(-1);
     summary.model = options.model;
     summary.evolution = {

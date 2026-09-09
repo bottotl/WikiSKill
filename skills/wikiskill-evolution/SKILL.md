@@ -22,28 +22,32 @@ For evidence collection, complete the real task with the normal engineering work
 Use this flow only for Skill evolution or paper reproduction:
 
 1. Read [evolution-guidelines.md](references/evolution-guidelines.md). Define real domain tasks for the Inference Agent and align task text, fixtures, scorer expectations, and write scope. Use the dataset template there. The task must ask the Agent to do the work, not to optimize the Skill.
-2. Prepare one experiment artifact before any Provider rollout. This command validates the dataset through the selected scorer, freezes the complete active Skill context and evolution baseline, and runs the experiment audit:
+2. Run the standard one-shot command. It prepares the frozen experiment, executes the complete evolution loop, and audits the terminal evidence. It never publishes the staged candidate:
 
    ```sh
-   wikiskill experiment prepare \
+   wikiskill experiment run \
      --workspace <workspace> \
      --dataset <dataset.json> \
      --target <skill-id> \
      --scorer <scorer-ref> \
+     --provider <codex|claude> \
+     --model <model-id> \
+     --reasoning-effort <level> \
+     --tool-profile <none|workspace> \
+     --iterations <K> \
+     --max-provider-launches <count> \
      [--empty] \
-     --json > <experiment.json>
+     --json-events
    ```
 
-   Resolve blockers and review sample-size warnings. Task semantics, write scope, and split provenance require human or source-level review. Use `wikiskill experiment audit --experiment <experiment.json> --json` to recheck a stored artifact.
-3. A known-fix RED-to-GREEN check is optional diagnostic evidence, not an evolution prerequisite, and its patch must remain hidden from Inference Agents.
-4. Start `wikiskill evolve --experiment <experiment.json>` with explicit Provider, model, reasoning effort, tool profile, iteration count, launch budget, and run id. The CLI reads the prepared authority fields and blocks any dataset, Skill, or Wiki drift. Use `--runner-timeout-ms` only when the task duration justifies a frozen non-default timeout.
-5. Audit the terminal run before interpretation or publication:
+   Resolve blockers and review sample-size warnings. Task semantics, write scope, and split provenance require human or source-level review.
+3. When preparation and execution require separate review, use `wikiskill experiment prepare ... > experiment.json`, optionally recheck it with `wikiskill experiment audit --experiment experiment.json`, then run `wikiskill evolve --experiment experiment.json ...` followed by:
 
    ```sh
    wikiskill run audit --run-root <run-root> --workspace <workspace> --json
    ```
 
-6. Interpret the result with the decision table in [evolution-guidelines.md](references/evolution-guidelines.md), then review and publish an accepted candidate when appropriate.
+4. Interpret the result with the decision table in [evolution-guidelines.md](references/evolution-guidelines.md), then review and publish an accepted candidate when appropriate.
 
 ## Boundaries
 

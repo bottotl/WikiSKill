@@ -41,7 +41,8 @@ WikiSkill 维护三层状态：
 verifier、彼此独立的 train/val/test 划分，以及能反映目标质量的 scorer。
 
 上层产品可以从多次独立任务轨迹和验证证据物化这些输入，再调用
-`wikiskill experiment prepare` 和 `wikiskill evolve --experiment`。WikiSkill 的算法层不会自行
+`wikiskill experiment run`；需要外部审阅准备结果时，再拆为 `experiment prepare`
+和 `evolve --experiment`。WikiSkill 的算法层不会自行
 猜测、复制或补齐缺失的数据集和 scorer。
 
 ### 证据与演化分层
@@ -181,8 +182,7 @@ WikiSkill 只把 `input` 和 `outputSchema` 传给 Inference Agent；ground trut
 执行：
 
 ```sh
-wikiskill experiment prepare --workspace . --target <skill-id> --dataset dataset.json --scorer builtin:exact-output-v1 --json > experiment.json
-wikiskill evolve --experiment experiment.json --provider claude --model <model-id> --reasoning-effort low --tool-profile none --iterations 1 --max-provider-launches 24 --json-events
+wikiskill experiment run --workspace . --target <skill-id> --dataset dataset.json --scorer builtin:exact-output-v1 --provider claude --model <model-id> --reasoning-effort low --tool-profile none --iterations 1 --max-provider-launches 24 --json-events
 wikiskill status --workspace . --run <run-id> --json
 ```
 
@@ -190,29 +190,29 @@ wikiskill status --workspace . --run <run-id> --json
 
 当前采样次数是实验设置：command-exit 在训练任务不足 4 个时重复执行，以提供至少 4 条真实训练轨迹；内置其他运行路径采用每任务训练 2 次、评估 3 次。论文附录要求 Proposer 读取至少 4 条轨迹，并未规定这些重复次数或固定 4/2/2 划分。baseline validation 满分时按算法提前结束，不为凑轨迹启动训练。
 
-`wikiskill dataset verify-known-fix` 是已有修复补丁的缺陷诊断命令，用于检查该补丁在指定任务上的 RED→GREEN 表现；它不是通用演化的启动条件。合法任务集与 scorer 可以在没有已知补丁时用于演化。
-
 ## Experiment Authoring Skill
 
 The package includes `skills/wikiskill-evolution/SKILL.md` for designing,
 auditing, running, and interpreting Skill-evolution experiments. Before an
-expensive rollout, prepare one frozen experiment artifact:
+expensive rollout, use the one-shot command that prepares, evolves, and audits
+without publishing the candidate:
 
 ```sh
-wikiskill experiment prepare --workspace . --target <skill-id> --dataset dataset.json --scorer <scorer-ref> --json > experiment.json
-wikiskill experiment audit --experiment experiment.json --json
+wikiskill experiment run --workspace . --target <skill-id> --dataset dataset.json --scorer <scorer-ref> --provider <codex|claude> --model <model-id> --reasoning-effort <level> --tool-profile <none|workspace> --iterations <K> --max-provider-launches <count> --json-events
 ```
 
-Preparation owns dataset and scorer validation, context freezing, baseline
-capture, and experiment audit. The stored artifact removes manual digest
-plumbing while `evolve` still blocks authority drift. Task semantics, split
-provenance, and task/fixture/scorer alignment require domain review. Audit a completed run with
-`wikiskill run audit --run-root <run-root> --workspace <workspace> --json`
-before candidate publication.
+For review-sensitive workflows, `experiment prepare`, `experiment audit`,
+`evolve --experiment`, and `run audit` remain separate replayable commands.
+Task semantics, split provenance, and task/fixture/scorer alignment require
+domain review.
 
 使用 `--empty` 可以从空的 active S0 创建第一个 Skill；若要复现论文的空 W0，需从新初始化且尚未积累模式的 Wiki 开始。
 `experiment prepare` 将 workspace、dataset、target Skill 和 Wiki 基线收敛到一个
 artifact；任一 authority 在准备后发生变化，都会在创建 evolution run 前被阻断。
+
+## 开发诊断
+
+`wikiskill dataset verify-known-fix` 用于检查已有补丁在指定任务上的 RED-to-GREEN 表现。它只诊断 harness、scorer 或已知修复，不属于 Skill evolution 标准流程，也不是启动演化的前置条件。
 
 ## Coding Task
 
@@ -241,7 +241,6 @@ Evolution 不会直接修改 live Skill，而是生成候选：
 
 ```sh
 wikiskill candidate diff --workspace . --candidate <id> --json
-wikiskill candidate apply --workspace . --candidate <id> --dry-run --json
 wikiskill candidate apply --workspace . --candidate <id> --json
 wikiskill rollback --workspace . --receipt <receipt-id> --json
 ```
@@ -265,6 +264,7 @@ context receipt
 context receipts
 experiment prepare
 experiment audit
+experiment run
 run audit
 bootstrap install
 bootstrap uninstall

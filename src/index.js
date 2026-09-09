@@ -330,7 +330,7 @@ const persistFailedAttempt = async ({ runRoot, attemptId, task, split, iteration
 
 async function makeTrace({ runRoot, task, split, phase, iteration, attempt, rollout = 1, skillDigest, skills, adapter, runner, model, abortSignal, wiki, traceDirectory, recordInferenceInvocation }) {
   if (!INFERENCE_PHASES.has(phase)) throw new WikiSkillError(`Inference phase is invalid: ${String(phase)}`);
-  const attemptId = `${String(attempt ?? 1).padStart(2, "0")}-${String(iteration).padStart(2, "0")}-${split}-${task.id}-${rollout}`;
+  const attemptId = `${String(attempt ?? 1).padStart(2, "0")}-${String(iteration).padStart(2, "0")}-${phase}-${split}-${task.id}-${rollout}`;
   const phaseId = (traceDirectory || `iter-${String(iteration).padStart(2, "0")}`).split(/[\\/]/u).join("-");
   const workdir = path.join(runRoot, "environments", `${phaseId}-${attemptId}`);
   await fsp.mkdir(workdir, { recursive: true });
@@ -407,7 +407,7 @@ async function makeTrace({ runRoot, task, split, phase, iteration, attempt, roll
     });
     const knowledgeConsumption = knowledgeContext?.verify(result.events, result.isolationEvidence);
     const provider = result.provider ? normalizeProviderSession(result.provider, "Inference") : undefined;
-    if (provider) await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, phase, iteration, rollout, provider });
+    await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, phase, iteration, rollout, ...(provider ? { provider } : {}) });
     const prediction = await (adapter.extractPrediction || defaultAdapter.extractPrediction)({ task: visibleTask, result, split, iteration, adapterConfig });
     const evaluated = await (adapter.score || defaultAdapter.score)({ task, prediction, groundTruth: task.groundTruth, environment, workdir: environmentWorkdir, split, iteration, adapterConfig });
     if (!scoreRange(evaluated?.score)) throw new WikiSkillError(`Evaluator returned invalid score for ${task.id}.`);
@@ -926,9 +926,9 @@ async function runEvolution(runOrId, options = {}) {
     return provider;
   };
   const recordInferenceInvocation = async (value) => {
-    const provider = await registerRuntimeSession("inference", value.provider);
     if (!INFERENCE_PHASES.has(value.phase)) throw new WikiSkillError(`Inference invocation phase is invalid: ${String(value.phase)}`);
-    state.inferenceInvocations = [...(state.inferenceInvocations || []), { schema: "wikiskill.inference-invocation.v1", launchRef: value.launchRef, taskId: value.taskId, split: value.split, phase: value.phase, iteration: value.iteration, rollout: value.rollout, provider }];
+    const provider = value.provider ? await registerRuntimeSession("inference", value.provider) : undefined;
+    state.inferenceInvocations = [...(state.inferenceInvocations || []), { schema: "wikiskill.inference-invocation.v1", launchRef: value.launchRef, taskId: value.taskId, split: value.split, phase: value.phase, iteration: value.iteration, rollout: value.rollout, ...(provider ? { provider } : {}) }];
     await fsp.writeFile(statePath, json(state));
   };
   const recordLearningInvocation = async (value) => {

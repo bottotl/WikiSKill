@@ -15,6 +15,7 @@ wikiskill evolution baseline --workspace <workspace> --target <skill-id> [--empt
 wikiskill experiment prepare --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> [--empty] --json
 wikiskill experiment audit --dataset <dataset.json> --target <skill-id> [--skill-context <context.json>] [--baseline <baseline.json>] [--mode publishable|smoke] [--empty] --json
 wikiskill experiment audit --experiment <experiment.json> --json
+wikiskill experiment run --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count> [--empty] [--run-id <id>] --json-events
 wikiskill run audit --run-root <run-root> --workspace <workspace> --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
@@ -32,7 +33,7 @@ const SUBCOMMANDS = Object.freeze({
   candidate: new Set(["diff", "apply"]),
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   evolution: new Set(["baseline"]),
-  experiment: new Set(["prepare", "audit"]),
+  experiment: new Set(["prepare", "audit", "run"]),
   run: new Set(["audit"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate", "verify-known-fix", "compile-commit", "recommend-commit"]),
@@ -142,6 +143,43 @@ const readExperiment = async (input) => {
   return { experimentPath, experiment };
 };
 
+const applyExperiment = (options, experiment) => Object.assign(options, {
+  workspace: experiment.workspace,
+  target: experiment.targetSkill,
+  datasetPath: experiment.datasetPath,
+  scorerRef: experiment.scorerRef,
+  empty: experiment.empty === true,
+  expectedWorkspaceId: experiment.baseline?.workspaceId,
+  expectedDatasetDigest: experiment.datasetDigest,
+  expectedTargetSkillDigest: experiment.baseline?.targetSkillDigest ?? undefined,
+  expectedActiveSkillSetDigest: experiment.baseline?.activeSkillSetDigest,
+  expectedWikiDigest: experiment.baseline?.wikiDigest
+});
+
+const validateEvolutionLaunch = (options) => {
+  const runtime = [options.provider, options.modelId, options.reasoningEffort, options.scorerRef, options.toolProfile, options.iterationLimit, options.maxProviderLaunches];
+  if (runtime.some((value) => value === undefined)) throw new Error("Evolution requires --provider, --model, --reasoning-effort, --scorer, --tool-profile, --iterations, and --max-provider-launches.");
+  if (options.toolProfile !== "none" && options.toolProfile !== "workspace") throw new Error("Evolution --tool-profile must be none or workspace.");
+  if (!/^\d+$/u.test(options.iterationLimit) || !Number.isSafeInteger(Number(options.iterationLimit)) || Number(options.iterationLimit) < 1) throw new Error("Evolution --iterations must be a positive safe integer.");
+  if (!/^\d+$/u.test(options.maxProviderLaunches) || Number(options.maxProviderLaunches) < 1 || Number(options.maxProviderLaunches) > 10_000) throw new Error("Evolution --max-provider-launches must be between 1 and 10000.");
+  if (options.runnerTimeoutMs !== undefined && (!/^\d+$/u.test(options.runnerTimeoutMs) || Number(options.runnerTimeoutMs) < 1_000 || Number(options.runnerTimeoutMs) > 3_600_000)) throw new Error("Evolution --runner-timeout-ms must be between 1000 and 3600000.");
+  if (!options.expectedWorkspaceId) throw new Error("evolve --dataset requires --expected-workspace-id from evolution baseline.");
+  if (!options.expectedDatasetDigest) throw new Error("evolve --dataset requires --expected-dataset-digest from dataset validate.");
+  if (!options.empty && !options.expectedTargetSkillDigest) throw new Error("evolve --dataset requires --expected-target-skill-digest from evolution baseline.");
+  if (!options.expectedActiveSkillSetDigest) throw new Error("evolve --dataset requires --expected-active-skill-set-digest from evolution baseline.");
+  if (!options.expectedWikiDigest) throw new Error("evolve --dataset requires --expected-wiki-digest from evolution baseline.");
+};
+
+const prepareExperiment = async (options) => {
+  if (!options.workspace || !options.datasetPath || !options.target || !options.scorerRef) throw new Error("experiment prepare requires --workspace, --dataset, --target, and --scorer.");
+  const { datasetPath, dataset } = await validateDatasetFile(options.datasetPath, options.scorerRef);
+  const skillContext = await core.prepareContext(options.workspace);
+  const baseline = await core.inspectEvolutionBaseline(options.workspace, options.target, { empty: options.empty === true });
+  const result = require("./audit/experiment").auditExperiment({ tasks: dataset.tasks, targetSkill: options.target, skillContext, baseline, mode: "publishable", empty: options.empty === true });
+  const experiment = { schema: "wikiskill.experiment.v1", workspace: path.resolve(options.workspace), datasetPath, datasetDigest: dataset.digest, scorerRef: options.scorerRef, targetSkill: options.target, empty: options.empty === true, skillContext, baseline, preparedAt: new Date().toISOString() };
+  return { experiment, result };
+};
+
 async function execute(argv, io = { stdout: process.stdout.write.bind(process.stdout), stderr: process.stderr.write.bind(process.stderr) }) {
   let emittedRunId;
   try {
@@ -154,18 +192,7 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       const conflicts = ["workspace", "target", "datasetPath", "scorerRef", "expectedWorkspaceId", "expectedDatasetDigest", "expectedTargetSkillDigest", "expectedActiveSkillSetDigest", "expectedWikiDigest"].filter((key) => options[key] !== undefined);
       if (conflicts.length) throw new Error("evolve --experiment cannot be combined with explicit experiment authority flags.");
       const { experiment } = await readExperiment(options.experimentPath);
-      Object.assign(options, {
-        workspace: experiment.workspace,
-        target: experiment.targetSkill,
-        datasetPath: experiment.datasetPath,
-        scorerRef: experiment.scorerRef,
-        empty: experiment.empty === true,
-        expectedWorkspaceId: experiment.baseline?.workspaceId,
-        expectedDatasetDigest: experiment.datasetDigest,
-        expectedTargetSkillDigest: experiment.baseline?.targetSkillDigest ?? undefined,
-        expectedActiveSkillSetDigest: experiment.baseline?.activeSkillSetDigest,
-        expectedWikiDigest: experiment.baseline?.wikiDigest
-      });
+      applyExperiment(options, experiment);
     }
     if (!options.json && !options.jsonEvents) throw new Error("Commands require --json (or --json-events for evolve).");
     let data;
@@ -179,17 +206,7 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
     else if (options.command === "evolve") {
       if (!options.jsonEvents) throw new Error("evolve requires --json-events.");
       if (options.datasetPath) {
-        const runtime = [options.provider, options.modelId, options.reasoningEffort, options.scorerRef, options.toolProfile, options.iterationLimit, options.maxProviderLaunches];
-        if (runtime.some((value) => value === undefined)) throw new Error("evolve --dataset requires --provider, --model, --reasoning-effort, --scorer, --tool-profile, --iterations, and --max-provider-launches.");
-        if (options.toolProfile !== "none" && options.toolProfile !== "workspace") throw new Error("evolve --tool-profile must be none or workspace.");
-        if (!/^\d+$/u.test(options.iterationLimit) || !Number.isSafeInteger(Number(options.iterationLimit)) || Number(options.iterationLimit) < 1) throw new Error("evolve --iterations must be a positive safe integer.");
-        if (!/^\d+$/u.test(options.maxProviderLaunches) || Number(options.maxProviderLaunches) < 1 || Number(options.maxProviderLaunches) > 10_000) throw new Error("evolve --max-provider-launches must be between 1 and 10000.");
-        if (options.runnerTimeoutMs !== undefined && (!/^\d+$/u.test(options.runnerTimeoutMs) || Number(options.runnerTimeoutMs) < 1_000 || Number(options.runnerTimeoutMs) > 3_600_000)) throw new Error("evolve --runner-timeout-ms must be between 1000 and 3600000.");
-        if (!options.expectedWorkspaceId) throw new Error("evolve --dataset requires --expected-workspace-id from evolution baseline.");
-        if (!options.expectedDatasetDigest) throw new Error("evolve --dataset requires --expected-dataset-digest from dataset validate.");
-        if (!options.empty && !options.expectedTargetSkillDigest) throw new Error("evolve --dataset requires --expected-target-skill-digest from evolution baseline.");
-        if (!options.expectedActiveSkillSetDigest) throw new Error("evolve --dataset requires --expected-active-skill-set-digest from evolution baseline.");
-        if (!options.expectedWikiDigest) throw new Error("evolve --dataset requires --expected-wiki-digest from evolution baseline.");
+        validateEvolutionLaunch(options);
       }
       data = await withAbort((signal) => runEvolutionCommand(options, io, signal, (id) => { emittedRunId = id; }));
       io.stdout(`${JSON.stringify({ schema: "wikiskill.event.v1", type: "evolution.result", runId: data.runId, data })}\n`);
@@ -208,15 +225,23 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
     } else if (options.command === "experiment") {
       const auditExperiment = require("./audit/experiment").auditExperiment;
       if (options.subcommand === "prepare") {
-        if (!options.workspace || !options.datasetPath || !options.target || !options.scorerRef) throw new Error("experiment prepare requires --workspace, --dataset, --target, and --scorer.");
-        const { datasetPath, dataset } = await validateDatasetFile(options.datasetPath, options.scorerRef);
-        const skillContext = await core.prepareContext(options.workspace);
-        const baseline = await core.inspectEvolutionBaseline(options.workspace, options.target, { empty: options.empty === true });
-        const result = auditExperiment({ tasks: dataset.tasks, targetSkill: options.target, skillContext, baseline, mode: "publishable", empty: options.empty === true });
-        data = { schema: "wikiskill.experiment.v1", workspace: path.resolve(options.workspace), datasetPath, datasetDigest: dataset.digest, scorerRef: options.scorerRef, targetSkill: options.target, empty: options.empty === true, skillContext, baseline, preparedAt: new Date().toISOString() };
-        return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the experiment preparation blockers and prepare a new artifact."] : []), result.blockers.length ? 1 : 0, io);
+        const prepared = await prepareExperiment(options);
+        return output(core.ENVELOPE(prepared.experiment, prepared.result.warnings, prepared.result.blockers, prepared.result.blockers.length ? ["Resolve the experiment preparation blockers and prepare a new artifact."] : []), prepared.result.blockers.length ? 1 : 0, io);
       }
-      if (options.subcommand !== "audit") throw new Error("Only `experiment prepare` and `experiment audit` are supported.");
+      if (options.subcommand === "run") {
+        if (!options.jsonEvents) throw new Error("experiment run requires --json-events.");
+        const prepared = await prepareExperiment(options);
+        if (prepared.result.blockers.length) return output({ schema: "wikiskill.event.v1", type: "experiment.failed", blockers: prepared.result.blockers }, 1, io);
+        io.stdout(`${JSON.stringify({ schema: "wikiskill.event.v1", type: "experiment.prepared", data: prepared.experiment, warnings: prepared.result.warnings })}\n`);
+        const runOptions = applyExperiment({ ...options }, prepared.experiment);
+        validateEvolutionLaunch(runOptions);
+        const evolved = await withAbort((signal) => runEvolutionCommand(runOptions, io, signal, (id) => { emittedRunId = id; }));
+        const audit = require("./audit/run").auditRun(evolved.runRoot, { workspace: prepared.experiment.workspace });
+        if (audit.blockers.length) return output({ schema: "wikiskill.event.v1", type: "experiment.failed", runId: evolved.runId, blockers: audit.blockers }, 1, io);
+        io.stdout(`${JSON.stringify({ schema: "wikiskill.event.v1", type: "experiment.result", runId: evolved.runId, data: { evolution: evolved, audit: audit.data }, warnings: audit.warnings })}\n`);
+        return 0;
+      }
+      if (options.subcommand !== "audit") throw new Error("Only `experiment prepare`, `experiment audit`, and `experiment run` are supported.");
       let datasetPath;
       let dataset;
       let targetSkill;
@@ -295,8 +320,8 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
     return output(core.ENVELOPE(data), 0, io);
   } catch (error) {
     const blockers = error.blockers || [error instanceof Error ? error.message : String(error)];
-    if (argv[0] === "evolve" && argv.includes("--json-events")) {
-      return output({ schema: "wikiskill.event.v1", type: "evolution.failed", ...(emittedRunId ? { runId: emittedRunId } : {}), blockers }, 1, io);
+    if (argv.includes("--json-events") && (argv[0] === "evolve" || (argv[0] === "experiment" && argv[1] === "run"))) {
+      return output({ schema: "wikiskill.event.v1", type: argv[0] === "evolve" ? "evolution.failed" : "experiment.failed", ...(emittedRunId ? { runId: emittedRunId } : {}), blockers }, 1, io);
     }
     return output(core.ENVELOPE(null, [], blockers, []), 1, io);
   }

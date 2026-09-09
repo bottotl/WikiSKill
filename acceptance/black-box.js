@@ -38,6 +38,7 @@ const main = async () => {
     const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8", env });
     assert.equal(help.status, 0);
     assert.match(help.stdout, /experiment prepare .*--dataset/u);
+    assert.match(help.stdout, /experiment run .*--dataset/u);
     assert.match(help.stdout, /evolve --experiment/u);
     assert.doesNotMatch(help.stdout, /foreground|episode|dataset create|fixture-evolve/u);
 
@@ -58,11 +59,12 @@ const main = async () => {
     const datasetPath = path.join(fixtureRoot, "dataset.json");
     const fixtureDataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
     assert.deepEqual(Object.fromEntries(["train", "val", "test"].map((split) => [split, fixtureDataset.tasks.filter((task) => task.split === split).length])), { train: 4, val: 2, test: 2 });
-    const prepared = invoke(["experiment", "prepare", "--workspace", workspace, "--target", "target-skill", "--dataset", datasetPath, "--scorer", "scorer:fixture", "--json"], env)[0];
-    const experimentPath = path.join(root, "experiment.json");
-    await fs.writeFile(experimentPath, JSON.stringify(prepared));
     const events = invoke([
-      "evolve", "--experiment", experimentPath,
+      "experiment", "run",
+      "--workspace", workspace,
+      "--target", "target-skill",
+      "--dataset", datasetPath,
+      "--scorer", "scorer:fixture",
       "--provider", "claude",
       "--model", "fixture-model",
       "--reasoning-effort", "low",
@@ -72,9 +74,10 @@ const main = async () => {
       "--run-id", "installed-acceptance",
       "--json-events"
     ], env);
-    assert.equal(events[0].selection, "dataset-file");
+    assert.equal(events[0].type, "experiment.prepared");
     assert.equal(events.find((event) => event.type === "evolution.launch-budget-selected").estimatedProviderLaunches, 24);
-    const result = events.at(-1).data;
+    assert.equal(events.at(-1).data.audit.status, "completed");
+    const result = events.at(-1).data.evolution;
     assert.equal(result.state.baselineValidationScore, 0);
     assert.equal(result.state.bestValidationScore, 1);
     assert.deepEqual(result.state.proposalHistory.map((entry) => entry.candidateValidationScore), [0.5, 1]);

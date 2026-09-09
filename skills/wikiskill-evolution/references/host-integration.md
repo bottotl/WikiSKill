@@ -20,7 +20,7 @@ A domain adapter may provide:
 
 Hosts and adapters must not copy or redefine the generic evolution method. Distribute this Skill from the WikiSkill package or a pinned repository revision.
 
-Use `wikiskill experiment prepare` as the standard launch contract, `wikiskill experiment audit` to recheck its artifact, and `wikiskill run audit` for terminal evidence.
+Use `wikiskill experiment run` as the standard automated entry point. Use separate `experiment prepare`, `experiment audit`, `evolve --experiment`, and `run audit` commands when an external review boundary must sit between preparation and execution.
 
 ## Required Host Behavior
 

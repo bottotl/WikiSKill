@@ -111,10 +111,9 @@ Evolution stages an accepted candidate; it does not update the live Skill automa
 
 1. Run `wikiskill candidate diff` and review the complete bundle.
 2. Verify the terminal run audit.
-3. Run `wikiskill candidate apply --dry-run` and verify the live baseline has not drifted.
-4. Apply the candidate and retain the receipt.
-5. Prepare a fresh context and confirm that a later task consumes the new live Skill.
-6. Use `wikiskill rollback` with the receipt if the published Skill must be restored.
+3. Run `wikiskill candidate apply`; it rechecks the live baseline before writing. Retain the receipt.
+4. When downstream context delivery is in scope, prepare a fresh context and confirm that it exposes the new live Skill.
+5. Use `wikiskill rollback` with the receipt if the published Skill must be restored.
 
 Do not force a candidate by changing the dataset or threshold after `no_action` or rejection. Preserve the Raw trajectories, Wiki patterns, and impact record, then decide whether the evidence reveals a Skill gap, dataset defect, or deterministic product defect.
 
