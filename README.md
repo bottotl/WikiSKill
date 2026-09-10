@@ -293,3 +293,23 @@ candidate diff
 candidate apply
 rollback
 ```
+
+### Daily learning review and revisions
+
+`candidate review --workspace <workspace> --candidate <id> --input <review.json> --json`
+accepts `approved`, `rejected`, or `changes_requested` as `verdict`. Every review
+requires `reviewer`, a non-empty `reason`, and `expectedDigest` matching the
+displayed candidate's `resultDigest`. Repeating the same review returns
+`reused: true` without changing its timestamp. A request for changes cannot be
+published; approval and publication remain separate actions.
+
+To revise, pass `supersedes: "<previous-candidate-id>"` in the next
+`candidate propose` input. Only a matching daily candidate that is pending or
+has changes requested can be revised, and its live baseline must still match.
+The replacement retains `supersedes` and structured `revisionFeedback` with the
+previous reviewer, reason, timestamp, digest and workspace-relative `reviewRef`.
+The old candidate remains in `candidate list` as `superseded` with
+`supersededBy`; its original review is preserved. Identical revision retries
+reuse the replacement. Revising an approved or rejected candidate, branching
+from an already superseded candidate, or publishing a superseded candidate is
+rejected.

@@ -117,6 +117,9 @@ async function diffCandidate(workspaceInput, candidateId) {
 async function applyCandidateUnlocked(workspaceInput, candidateId, { dryRun = false } = {}) {
   const { workspace, config } = await loadWorkspace(workspaceInput);
   const loaded = await loadCandidate(workspace, candidateId);
+  const currentReview = await readReview(workspace, candidateId);
+  if (currentReview?.supersededBy) throw new Error("Candidate was superseded; review its replacement.");
+  if (!dryRun && currentReview?.verdict === "changes_requested") throw new Error("Candidate has changes requested and cannot be published.");
   if (!dryRun && await treeDigestOrNull(path.join(workspace, ".wikiskill", "skills", loaded.candidate.targetSkill)) === loaded.candidate.resultDigest) {
     for (const entry of await fs.readdir(path.join(workspace, ".wikiskill", "receipts"))) {
       if (!SAFE_ID.test(entry)) continue;
@@ -229,7 +232,19 @@ const readReview = async (workspace, id) => {
   catch (error) { if (error.code === "ENOENT") return null; throw error; }
 };
 
+async function withPublicationLock(workspaceInput, operation) {
+  const { workspace } = await loadWorkspace(workspaceInput);
+  const lockPath = path.join(workspace, ".wikiskill", "runtime", "publish.lock");
+  const lock = await fs.open(lockPath, "wx").catch(() => { throw new Error("Another Skill publication or review is active; retry after it completes."); });
+  try { return await operation(); }
+  finally { await lock.close(); await fs.unlink(lockPath); }
+}
+
 async function proposeCandidate(workspaceInput, input) {
+  return withPublicationLock(workspaceInput, () => proposeCandidateUnlocked(workspaceInput, input));
+}
+
+async function proposeCandidateUnlocked(workspaceInput, input) {
   const { workspace } = await loadWorkspace(workspaceInput);
   if (!input || !SAFE_ID.test(input.targetSkill || "") || !Array.isArray(input.files) || !input.files.length) throw new Error("A target Skill and files are required.");
   for (const key of ["summary", "reason"]) if (typeof input[key] !== "string" || !input[key].trim()) throw new Error(`${key} is required.`);
@@ -239,7 +254,8 @@ async function proposeCandidate(workspaceInput, input) {
   if (input.baselineDigest !== baselineDigest) throw new Error("Live Skill changed; read its current baseline before proposing.");
   if (input.supersedes !== undefined) {
     const previous = (await loadCandidate(workspace, input.supersedes)).candidate;
-    if (previous.origin !== "daily_learning" || previous.targetSkill !== input.targetSkill || previous.baselineDigest !== baselineDigest || (await readReview(workspace, input.supersedes))?.verdict === "approved") throw new Error("Only a matching pending daily proposal may be revised.");
+    const previousReview = await readReview(workspace, input.supersedes);
+    if (previous.origin !== "daily_learning" || previous.targetSkill !== input.targetSkill || previous.baselineDigest !== baselineDigest || (previousReview?.verdict && previousReview.verdict !== "changes_requested")) throw new Error("Only a matching pending or changes_requested daily proposal may be revised.");
   }
   if (baselineDigest !== null) {
     const receipts = await fs.readdir(path.join(workspace, ".wikiskill", "receipts"));
@@ -274,32 +290,49 @@ async function proposeCandidate(workspaceInput, input) {
     if (resultDigest === baselineDigest) return { candidate: null, noChange: true };
     const candidateId = `candidate-${digest(`${input.targetSkill}\0${baselineDigest}\0${resultDigest}`).slice(7, 31)}`;
     const finalRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
-    if (await exists(finalRoot)) return { candidate: (await loadCandidate(workspace, candidateId)).candidate, reused: true };
-    const candidate = { schema: "wikiskill.candidate.v1", candidateId, targetSkill: input.targetSkill, status: "pending_review", origin: "daily_learning", baselineDigest, resultDigest, summary: input.summary, reason: input.reason, evidenceRefs: input.evidenceRefs, createdAt: new Date().toISOString() };
-    await fs.writeFile(path.join(stage, "candidate.json"), json(candidate), { flag: "wx" });
-    await fs.rename(stage, finalRoot);
-    await sealReadOnly(finalRoot);
-    if (input.supersedes && input.supersedes !== candidateId) {
-      const previous = (await loadCandidate(workspace, input.supersedes)).candidate;
-      await reviewCandidate(workspace, input.supersedes, { verdict: "rejected", reviewer: "daily-learning-revision", reason: `被新候选 ${candidateId} 替代。`, expectedDigest: previous.resultDigest });
+    const previousReview = input.supersedes ? await readReview(workspace, input.supersedes) : null;
+    if (previousReview?.supersededBy && previousReview.supersededBy !== candidateId) throw new Error("Candidate already has a replacement; revise the latest proposal.");
+    if (input.supersedes === candidateId) throw new Error("A revision must change the candidate content.");
+    const reused = await exists(finalRoot);
+    const candidate = reused ? (await loadCandidate(workspace, candidateId)).candidate : { schema: "wikiskill.candidate.v1", candidateId, targetSkill: input.targetSkill, status: "pending_review", origin: "daily_learning", baselineDigest, resultDigest, summary: input.summary, reason: input.reason, evidenceRefs: input.evidenceRefs, createdAt: new Date().toISOString(), ...(input.supersedes ? { supersedes: input.supersedes, revisionFeedback: previousReview?.verdict ? { candidateId: input.supersedes, verdict: previousReview.verdict, reviewer: previousReview.reviewer, reason: previousReview.reason, reviewedAt: previousReview.reviewedAt, resultDigest: previousReview.resultDigest, reviewRef: `.wikiskill/runtime/candidate-reviews/${input.supersedes}.json` } : null } : {}) };
+    if (reused && input.supersedes && candidate.supersedes !== input.supersedes) throw new Error("Existing candidate belongs to a different revision chain.");
+    if (await treeDigestOrNull(liveRoot) !== baselineDigest) throw new Error("Live Skill changed during proposal creation.");
+    if (!reused) {
+      await fs.writeFile(path.join(stage, "candidate.json"), json(candidate), { flag: "wx" });
+      await fs.rename(stage, finalRoot);
+      await sealReadOnly(finalRoot);
     }
-    return { candidate, reused: false };
+    if (input.supersedes && input.supersedes !== candidateId) {
+      if (!previousReview?.supersededBy) await writeReview(workspace, input.supersedes, { ...previousReview, supersededBy: candidateId, supersededAt: new Date().toISOString() });
+    }
+    return { candidate, reused };
   } finally { await fs.rm(stage, { recursive: true, force: true }); }
 }
 
 async function reviewCandidate(workspaceInput, candidateId, input) {
+  return withPublicationLock(workspaceInput, () => reviewCandidateUnlocked(workspaceInput, candidateId, input));
+}
+
+async function reviewCandidateUnlocked(workspaceInput, candidateId, input) {
   const { workspace } = await loadWorkspace(workspaceInput);
   const { candidate } = await loadCandidate(workspace, candidateId);
-  if (!input || !["approved", "rejected"].includes(input.verdict) || typeof input.reviewer !== "string" || !input.reviewer.trim() || typeof input.reason !== "string" || !input.reason.trim()) throw new Error("Review requires verdict, reviewer and reason.");
+  if (!input || !["approved", "rejected", "changes_requested"].includes(input.verdict) || typeof input.reviewer !== "string" || !input.reviewer.trim() || typeof input.reason !== "string" || !input.reason.trim()) throw new Error("Review requires verdict, reviewer and reason.");
   if (input.expectedDigest !== candidate.resultDigest) throw new Error("Review digest does not match the displayed candidate.");
+  const previous = await readReview(workspace, candidateId);
+  if (previous?.supersededBy) throw new Error("Candidate was superseded; review its replacement.");
+  if (previous?.verdict === input.verdict && previous.reviewer === input.reviewer && previous.reason === input.reason && previous.resultDigest === input.expectedDigest) return { candidate, review: previous, reused: true };
   if (input.verdict === "approved") await diffCandidate(workspace, candidateId);
   const review = { verdict: input.verdict, reviewer: input.reviewer, reason: input.reason, resultDigest: candidate.resultDigest, reviewedAt: new Date().toISOString() };
+  await writeReview(workspace, candidateId, review);
+  return { candidate, review };
+}
+
+async function writeReview(workspace, candidateId, review) {
   const target = reviewPath(workspace, candidateId);
   await fs.mkdir(path.dirname(target), { recursive: true });
   const stage = `${target}.${crypto.randomUUID()}`;
   await fs.writeFile(stage, json(review));
   await fs.rename(stage, target);
-  return { candidate, review };
 }
 
 async function listCandidates(workspaceInput, { limit = 20, cursor = "" } = {}) {
@@ -319,8 +352,8 @@ async function listCandidates(workspaceInput, { limit = 20, cursor = "" } = {}) 
     const { candidate, skillRoot } = await loadCandidate(workspace, id);
     const currentDigest = await treeDigestOrNull(path.join(workspace, ".wikiskill", "skills", candidate.targetSkill));
     const review = await readReview(workspace, id);
-    const status = currentDigest === candidate.resultDigest && appliedDigests.get(id) === currentDigest ? "applied" : review?.verdict === "rejected" ? "rejected" : currentDigest !== candidate.baselineDigest ? "stale" : review?.verdict === "approved" ? "approved" : candidate.status;
-    items.push({ ...candidate, status, review, files: await fileMap(skillRoot) });
+    const status = currentDigest === candidate.resultDigest && appliedDigests.get(id) === currentDigest ? "applied" : review?.supersededBy ? "superseded" : review?.verdict === "rejected" ? "rejected" : currentDigest !== candidate.baselineDigest ? "stale" : review?.verdict === "changes_requested" ? "changes_requested" : review?.verdict === "approved" ? "approved" : candidate.status;
+    items.push({ ...candidate, status, review, ...(review?.supersededBy ? { supersededBy: review.supersededBy } : {}), files: await fileMap(skillRoot) });
   }
   return { items, nextCursor: ids.length > Number(limit) ? ids[Number(limit) - 1] : null };
 }
