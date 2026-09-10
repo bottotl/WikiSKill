@@ -1,0 +1,25 @@
+README.md
+  s_d65adb70bcc534::t_dfe6eba2a5e4a8 296-315
+src/publishing.js
+  s_d65adb70bcc534::t_e74bf6808b2173 297,301-303
+  s_d65adb70bcc534::t_3c468192737d08 120-122,257-258,293-296,298-300,304,306,308,319,321-323,326-330,355-356
+  s_d65adb70bcc534::t_bd716d83df87ed 235-242,244-247,313-316
+test/revision-review.test.js
+  s_d65adb70bcc534::t_4e7869f703d38c 1-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "ccf0547184a862e400fdd190b9bb1ffa97c6fe37",
+  "prompts": {},
+  "sessions": {
+    "s_d65adb70bcc534": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a080a5-dc6f-7c43-b4f4-869d35beb33e",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
