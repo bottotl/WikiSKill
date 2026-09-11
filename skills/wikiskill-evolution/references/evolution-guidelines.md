@@ -105,6 +105,8 @@ The paper starts from `(S0, W0) = (empty, empty)`. Seeded evolution of an existi
 
 Preserve separate evidence for task correctness, required evidence, prohibited side effects, authorized write scope, and execution efficiency when relevant. A binary score may require every mandatory dimension, but diagnostics should identify the failed dimension.
 
+Keep raw private-scorer stdout, stderr, expected values, and expected-versus-actual details in auditor-only evaluation evidence. Wiki Maintainers and Skill Proposers may receive the score, failed public dimension names, process status, changed paths, and content digests, but never the private output contents. Put any diagnostic that the learning roles legitimately need in the visible task, public rubric, or public output contract instead of leaking it through scorer feedback.
+
 For command-scored tasks, use an argv array and bounded timeout. The canonical dataset validator delegates private-input validation to the selected built-in scorer. Keep private expectations in `groundTruth`; pass only task input and the public output schema to the Inference Agent.
 
 ## Interpret and Publish

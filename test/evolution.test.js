@@ -807,11 +807,15 @@ test("development runtime records code diff, tool events, and command verificati
   assert.equal(trace.events.some((event) => event.type === "tool_call"), true);
   assert.deepEqual(trace.verification.command, [process.execPath, "--test", "value.test.cjs"]);
   assert.equal(trace.verification.exitCode, 0);
-  assert.match(maintainerProjection, /not ok/u);
+  assert.doesNotMatch(maintainerProjection, /not ok/u);
   assert.doesNotMatch(maintainerProjection, /"command":\s*\[/u);
   assert.equal(proposerProjection.verification.command, undefined);
   assert.match(proposerProjection.verification.commandDigest, /^[0-9a-f]{64}$/u);
-  assert.match(proposerProjection.verification.stdout, /not ok/u);
+  assert.equal(proposerProjection.verification.stdout, undefined);
+  assert.equal(proposerProjection.verification.stderr, undefined);
+  assert.match(proposerProjection.verification.stdoutDigest, /^[0-9a-f]{64}$/u);
+  assert.match(proposerProjection.verification.stderrDigest, /^[0-9a-f]{64}$/u);
+  assert.ok(proposerProjection.verification.stdoutBytes > 0);
   assert.equal(JSON.stringify(proposerTraining).includes("value.test.cjs"), false);
   const baselineTest = rolloutInputs.find((item) => item.taskId === "dev-test-1" && !item.improved);
   const evolvedTest = rolloutInputs.find((item) => item.taskId === "dev-test-1" && item.improved);

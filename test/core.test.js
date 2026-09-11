@@ -365,6 +365,25 @@ test("maintainer validation failure leaves the Wiki unchanged", async () => {
   assert.deepEqual(await fs.readdir(path.join(manifest.runRoot, "wiki", "patterns")), []);
 });
 
+test("maintainer rejects pattern names that repeat the wiki patterns directory", async () => {
+  const repo = await makeRepo();
+  const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-state-"));
+  const dataset = { schema: "wikiskill.dataset.v1", tasks: [task("train-1", "train"), task("train-2", "train"), task("train-3", "train"), task("train-4", "train"), task("val", "val"), task("test", "test")] };
+  const manifest = await createRun({ repo, skillRoots: [".agents/skills"], targetSkills: ["one"], dataset, stateRoot, runId: "run-maintainer-pattern-prefix" });
+  const wikiFiles = ["index.md", "log.md", "skill-impact.md"];
+  const before = await Promise.all(wikiFiles.map((file) => fs.readFile(path.join(manifest.runRoot, "wiki", file), "utf8")));
+
+  for (const name of ["patterns/observed.md", "./patterns/observed.md"]) {
+    await assert.rejects(runEvolution(manifest.runRoot, {
+      maintainer: async ({ writePattern }) => writePattern(name, "# Observed\n"),
+      proposer: async (input) => { const traceReads = readFourTraces(input); return { action: "no_action", traceReads }; }
+    }), /relative to wiki\/patterns/u);
+  }
+
+  assert.deepEqual(await Promise.all(wikiFiles.map((file) => fs.readFile(path.join(manifest.runRoot, "wiki", file), "utf8"))), before);
+  assert.deepEqual(await fs.readdir(path.join(manifest.runRoot, "wiki", "patterns")), []);
+});
+
 test("compounds the Wiki across iterations and patches an existing pattern incrementally", async () => {
   const repo = await makeRepo();
   const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-state-"));

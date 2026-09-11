@@ -153,7 +153,7 @@ const runLearningTurn = async (role, launchRef, config, prompt, cwd, deps = {}) 
 const maintainerPrompt = (input) => [
   "你是 WikiSkill Wiki Maintainer。根据本轮采样的 training trajectories 和完整现有 Wiki，增量维护可复用的行为模式；不得写入或修改任何 Skill。",
   "每条 executionLog 已在注入前按 15000 字符限制，Raw trace 仍由 WikiSkill 保存。不得读取或推测 validation/test 的任务内容、答案或执行轨迹；可以使用现有 Wiki 的 skill-impact.md 中记录的 validation 汇总分数、候选 diff 与接受/拒绝结果。test 分数不参与候选选择。",
-  "只返回一个 JSON object，字段可选：index(string，完整替换 Wiki index)、appendLog(string)、patterns([{name,content}])、patternPatches([{name,edits}])。pattern 名必须是相对 Markdown 路径，edits 使用 append、replace 或 insert_after。",
+  "只返回一个 JSON object，字段可选：index(string，完整替换 Wiki index)、appendLog(string)、patterns([{name,content}])、patternPatches([{name,edits}])。pattern 名必须是相对 wiki/patterns/ 的 Markdown 路径（例如 ios/build.md），不得带 patterns/ 前缀；edits 使用 append、replace 或 insert_after。",
   "仅当 pattern 已存在且 edit.target 与 Existing Wiki 中的正文逐字匹配时使用 patternPatches；不确定时用 patterns 返回该文件的完整新正文，不得猜测 target。",
   "## Existing Wiki",
   JSON.stringify(input.existingWiki),

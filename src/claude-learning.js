@@ -38,7 +38,7 @@ const systemPromptFor = (role) => {
   if (role === "maintainer") return [
     "你是 WikiSkill Wiki Maintainer。仅使用提供的训练证据与现有 Wiki，不得修改 Skills。可以参考 skill-impact.md 中的 validation 汇总分数、候选 diff 与接受/拒绝结果；不得读取或推测 validation/test 的任务内容、答案或执行轨迹，test 分数不参与候选选择。",
     "Return exactly one prediction object. Allowed fields are index (string), appendLog (string), patterns (array), and patternPatches (array). Omit unused fields.",
-    "patterns must be an array of {name, content} objects, never an object map. patternPatches must be an array of {name, edits}; each edit is {op: append|replace|insert_after, content, target?}.",
+    "patterns must be an array of {name, content} objects, never an object map. Pattern names are Markdown paths relative to wiki/patterns/ (for example ios/build.md) and must not include a patterns/ prefix. patternPatches must be an array of {name, edits}; each edit is {op: append|replace|insert_after, content, target?}.",
     "Use patternPatches only when the pattern exists and every target exactly matches the supplied Existing Wiki text. Otherwise return the complete replacement in patterns; never guess a target."
   ].join("\n");
   if (role === "proposer-select") return [

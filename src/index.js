@@ -47,6 +47,13 @@ const normalizeRelative = (value, label) => {
   }
   return normalized === "." ? "" : normalized;
 };
+const normalizePatternName = (value) => {
+  const relative = path.posix.normalize(normalizeRelative(value, "pattern name"));
+  if (relative === "patterns" || relative.startsWith("patterns/") || path.posix.extname(relative) !== ".md") {
+    throw new WikiSkillError("Maintainer pattern name must be a Markdown path relative to wiki/patterns and must not include the patterns/ prefix.");
+  }
+  return relative;
+};
 const assertNoSymlink = async (root, relative) => {
   let current = path.resolve(root);
   for (const part of relative.split("/")) {
@@ -481,8 +488,10 @@ const traceForLearning = (trace) => ({
     outputExceeded: trace.verification.outputExceeded,
     changedPaths: trace.verification.changedPaths,
     disallowedPaths: trace.verification.disallowedPaths,
-    stdout: capLearningText(trace.verification.stdout, 9_000),
-    stderr: capLearningText(trace.verification.stderr, 4_000)
+    stdoutDigest: sha256(String(trace.verification.stdout || "")),
+    stderrDigest: sha256(String(trace.verification.stderr || "")),
+    stdoutBytes: Buffer.byteLength(String(trace.verification.stdout || ""), "utf8"),
+    stderrBytes: Buffer.byteLength(String(trace.verification.stderr || ""), "utf8")
   } } : {}),
   ...(trace.workspace ? { workspace: { ...trace.workspace, diff: capLearningText(trace.workspace.diff, 8_000) } } : {}),
   prediction: trace.prediction,
@@ -574,8 +583,8 @@ async function runMaintainer(runRoot, iteration, sampled, options) {
       patterns: await readWikiPatterns(runRoot)
     },
     recordInvocation: options.recordLearningInvocation,
-    writePattern: (name, content) => { normalizeRelative(name, "pattern name"); if (typeof content !== "string") throw new WikiSkillError("Maintainer pattern content must be text."); writes.push({ name, content }); },
-    patchPattern: (name, edits) => { normalizeRelative(name, "pattern name"); writes.push({ name, edits }); },
+    writePattern: (name, content) => { const relative = normalizePatternName(name); if (typeof content !== "string") throw new WikiSkillError("Maintainer pattern content must be text."); writes.push({ name: relative, content }); },
+    patchPattern: (name, edits) => { writes.push({ name: normalizePatternName(name), edits }); },
     appendLog: (content) => { if (typeof content !== "string") throw new WikiSkillError("Maintainer log content must be text."); writes.push({ name: "__log__", content }); }
   });
   if (result?.index && typeof result.index === "string") writes.push({ name: "__index__", content: result.index });
