@@ -1,0 +1,41 @@
+src/index.js
+  s_f9683fbe06b3f3::t_ce1c3a016e4d3e 491-494
+  s_08ba7be2d9ed2d::t_cb7960dfa6e9b9 50,52-56,586-587
+  s_08ba7be2d9ed2d::t_a4c571e54f046f 51
+src/codex-learning.js
+  s_08ba7be2d9ed2d::t_cb7960dfa6e9b9 156
+test/evolution.test.js
+  s_f9683fbe06b3f3::t_ce1c3a016e4d3e 810,814-818
+skills/wikiskill-evolution/references/evolution-guidelines.md
+  s_f9683fbe06b3f3::t_719d4780f90a23 108-109
+src/claude-learning.js
+  s_08ba7be2d9ed2d::t_cb7960dfa6e9b9 41
+test/core.test.js
+  s_08ba7be2d9ed2d::t_cb7960dfa6e9b9 368-375,382-383
+  s_08ba7be2d9ed2d::t_a4c571e54f046f 376-381
+  s_08ba7be2d9ed2d::t_678051e9b8ad7f 365-367
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "9ef019e4a7c625ca57025ae35dadd6f607e5b89f",
+  "prompts": {},
+  "sessions": {
+    "s_08ba7be2d9ed2d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a08bd0-b822-7320-8579-6a8880b84858",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    },
+    "s_f9683fbe06b3f3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a085b2-003e-7fe1-bbbd-367cc0722c6b",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "jft0m <377632523@qq.com>"
+    }
+  }
+}
