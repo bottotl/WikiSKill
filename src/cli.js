@@ -22,6 +22,7 @@ wikiskill bootstrap install|uninstall --workspace <repo> --command <context-comm
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
 wikiskill dataset verify-known-fix --dataset <dataset.json> --scorer <ref> --patch <changes.patch> --json
+wikiskill repository snapshot --repo <repo> --inventory <inventory.json> --output <snapshot.jsonl> --json
 wikiskill evolve --experiment <experiment.json> [--runtime-profile <profile.json> | --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count>] [--runner-timeout-ms <ms>] [--run-id <id>] --json-events
 wikiskill status --workspace <workspace> --run <id> [--state-root <dir>] --json
 wikiskill configure --workspace <workspace> --input <evolution-config.json> [--dry-run] --json
@@ -41,6 +42,7 @@ const SUBCOMMANDS = Object.freeze({
   run: new Set(["audit"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate", "verify-known-fix", "compile-commit", "recommend-commit"]),
+  repository: new Set(["snapshot"]),
 });
 
 const VALUE_FLAGS = Object.freeze({
@@ -77,7 +79,10 @@ const VALUE_FLAGS = Object.freeze({
   "--state-root": "stateRoot",
   "--context": "contextId",
   "--skill": "skillId",
-  "--command": "bootstrapCommand"
+  "--command": "bootstrapCommand",
+  "--repo": "repo",
+  "--inventory": "inventoryPath",
+  "--output": "outputPath"
 });
 
 const parse = (argv) => {
@@ -338,6 +343,14 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
         splitCounts: Object.fromEntries(["train", "val", "test"].map((split) => [split, dataset.tasks.filter((task) => task.split === split).length]))
       };
       }
+    } else if (options.command === "repository") {
+      if (options.subcommand !== "snapshot" || !options.repo || !options.inventoryPath || !options.outputPath) throw new Error("repository snapshot requires --repo, --inventory, and --output.");
+      const inventoryPath = path.resolve(options.inventoryPath);
+      const stat = await fs.lstat(inventoryPath);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Repository snapshot inventory must be a regular non-symlink file.");
+      const inventory = JSON.parse(await fs.readFile(inventoryPath, "utf8"));
+      if (!inventory || typeof inventory !== "object" || Array.isArray(inventory) || Object.keys(inventory).sort().join(",") !== "paths,schema" || inventory.schema !== "wikiskill.repository-snapshot-inventory.v1") throw new Error("Repository snapshot inventory schema is invalid.");
+      data = await require("./repository-snapshot").createRepositorySnapshot({ root: path.resolve(options.repo), output: path.resolve(options.outputPath), paths: inventory.paths });
     } else if (options.command === "candidate") {
       if (options.subcommand === "diff") data = await core.diffCandidate(options.workspace, options.candidate);
       else if (options.subcommand === "apply") data = await core.applyCandidate(options.workspace, options.candidate, options);

@@ -167,6 +167,49 @@ test("publishable audit requires and validates the complete active Skill context
   assert.deepEqual(result.blockers, []);
 });
 
+test("publishable operational audit requires two train and two validation episodes", () => {
+  const operationalTask = (id, split) => ({
+    id,
+    split,
+    input: { instruction: id },
+    groundTruth: {
+      schema: "wikiskill.scorer.operational-milestone.v1",
+      command: [process.execPath, "verify.cjs"],
+      milestoneOrder: ["M0"]
+    },
+    operational: {
+      episodeRef: `episode:${id}`,
+      objective: "terminal_success",
+      requiredMilestones: ["M0"]
+    },
+    evaluator: { capabilityRef: "builtin:operational-milestone-v1" }
+  });
+  const oneEach = auditExperiment({
+    tasks: [operationalTask("train-1", "train"), operationalTask("val-1", "val"), operationalTask("test-1", "test")],
+    targetSkill: "repo-validation",
+    mode: "publishable"
+  });
+  assert.match(oneEach.blockers.join("\n"), /at least 2 train and 2 val/u);
+  assert.match(oneEach.blockers.join("\n"), /repair_progress/u);
+
+  const missingMetadata = operationalTask("missing-metadata", "train");
+  delete missingMetadata.operational;
+  assert.match(auditExperiment({ tasks: [missingMetadata], targetSkill: "repo-validation", mode: "publishable" }).blockers.join("\n"), /operational metadata/u);
+
+  const repair = operationalTask("train-1", "train");
+  repair.operational.objective = "repair_progress";
+  const sufficient = auditExperiment({
+    tasks: [
+      repair, operationalTask("train-2", "train"),
+      operationalTask("val-1", "val"), operationalTask("val-2", "val"), operationalTask("test-1", "test")
+    ],
+    targetSkill: "repo-validation",
+    mode: "publishable"
+  });
+  assert.equal(sufficient.blockers.some((item) => /at least 2 train and 2 val/u.test(item)), false);
+  assert.equal(sufficient.blockers.some((item) => /repair_progress|terminal_success|operational metadata/u.test(item)), false);
+});
+
 test("terminal run audit verifies the Raw receipt, strict gating, final-only test, and training-only proposal reads", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-run-audit-"));
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "wikiskill-run-audit-workspace-"));
@@ -243,6 +286,7 @@ test("terminal run audit verifies the Raw receipt, strict gating, final-only tes
   const cli = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "wikiskill"), "run", "audit", "--run-root", root, "--workspace", workspace, "--json"], { encoding: "utf8" });
   assert.equal(cli.status, 0, cli.stdout || cli.stderr);
   assert.equal(JSON.parse(cli.stdout).data.schema, "wikiskill.run-audit.v1");
+
   fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest: `sha256:${"f".repeat(64)}` }));
   assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /receipt does not match/u.test(blocker)), true);
 });

@@ -85,6 +85,68 @@ process.stdin.on("end", () => {
   await assert.rejects(fs.access(capture.outputPath));
 });
 
+test("Codex runner preserves prediction schema definitions at the output schema root", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-codex-schema-defs-"));
+  const workdir = path.join(root, "workdir");
+  const capturePath = path.join(root, "capture.json");
+  const script = path.join(root, "fake-codex.cjs");
+  await fs.mkdir(workdir);
+  await fs.writeFile(script, `
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+const valueAfter = (flag) => args[args.indexOf(flag) + 1];
+process.stdin.resume();
+process.stdin.on("end", () => {
+  const schema = JSON.parse(fs.readFileSync(valueAfter("--output-schema"), "utf8"));
+  fs.writeFileSync(process.env.WIKISKILL_TEST_CAPTURE, JSON.stringify(schema));
+  fs.writeFileSync(valueAfter("-o"), JSON.stringify({ prediction: { gates: { build: { status: "passed" } } } }));
+  for (const record of [
+    { type: "thread.started", thread_id: "thread-schema-defs" },
+    { type: "turn.started" },
+    { type: "turn.completed", usage: {} }
+  ]) process.stdout.write(JSON.stringify(record) + "\\n");
+});
+`);
+  const runner = createCodexRunner({
+    executable: process.execPath,
+    executableArgs: [script],
+    env: { WIKISKILL_TEST_CAPTURE: capturePath },
+    timeoutMs: 10_000
+  });
+  const gate = {
+    type: "object",
+    additionalProperties: false,
+    required: ["status"],
+    properties: { status: { type: "string" } }
+  };
+
+  await runner({
+    systemPrompt: "skill",
+    input: {},
+    workdir,
+    tools: [],
+    model: { id: "model" },
+    predictionSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["gates"],
+      properties: {
+        gates: {
+          type: "object",
+          additionalProperties: false,
+          required: ["build"],
+          properties: { build: { $ref: "#/$defs/gate" } }
+        }
+      },
+      $defs: { gate }
+    }
+  });
+
+  const schema = JSON.parse(await fs.readFile(capturePath, "utf8"));
+  assert.deepEqual(schema.$defs, { gate });
+  assert.equal(schema.properties.prediction.properties.gates.properties.build.$ref, "#/$defs/gate");
+});
+
 test("Codex coding mode uses workspace-write and records command events", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-codex-coding-"));
   const workdir = path.join(root, "workdir");

@@ -1,6 +1,8 @@
 "use strict";
 
 const { spawn, spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -36,6 +38,21 @@ const changedPaths = (workdir) => {
     if (/[RC]/u.test(status) && records[index + 1]) paths.push(records[++index]);
   }
   return paths.sort();
+};
+
+const captureWorkspaceState = (workdir) => {
+  const diff = spawnSync("git", ["-C", workdir, "diff", "--no-ext-diff", "--binary", "HEAD"], { encoding: "buffer", maxBuffer: MAX_OUTPUT_BYTES });
+  const untracked = spawnSync("git", ["-C", workdir, "ls-files", "--others", "--exclude-standard", "-z"], { encoding: "utf8" });
+  if (diff.status !== 0 || untracked.status !== 0) throw new Error("scorer requires an isolated Git checkout.");
+  const hash = crypto.createHash("sha256");
+  hash.update(diff.stdout);
+  for (const relative of untracked.stdout.split("\0").filter(Boolean).sort()) {
+    hash.update(`\0${relative}\0`);
+    const target = path.join(workdir, relative);
+    const stat = fs.lstatSync(target);
+    hash.update(stat.isSymbolicLink() ? fs.readlinkSync(target) : fs.readFileSync(target));
+  }
+  return { changedPaths: changedPaths(workdir), digest: `sha256:${hash.digest("hex")}` };
 };
 
 const terminate = (child, signal) => {
@@ -123,4 +140,4 @@ const createCommandExitScorer = () => async ({ privateInput, workdir, environmen
   };
 };
 
-module.exports = { createCommandExitScorer, validateCommandExitInput };
+module.exports = { captureWorkspaceState, changedPaths, createCommandExitScorer, runCommand: run, validateCommandExitInput };

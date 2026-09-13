@@ -21,7 +21,7 @@ For evidence collection, complete the real task with the normal engineering work
 
 Use this flow only for Skill evolution or paper reproduction:
 
-1. Read [evolution-guidelines.md](references/evolution-guidelines.md). Define real domain tasks for the Inference Agent and align task text, fixtures, scorer expectations, and write scope. Use the dataset template there. The task must ask the Agent to do the work, not to optimize the Skill.
+1. Read [evolution-guidelines.md](references/evolution-guidelines.md). Define real domain tasks for the Inference Agent and align task text, fixtures, scorer expectations, and write scope. Use the dataset template there. The task must ask the Agent to do the work, not to optimize the Skill. Use `builtin:operational-milestone-v1` when improvement means advancing a real multi-stage workflow; accurate failure reporting is then an eligibility requirement, not an optimization score.
 2. Run the standard one-shot command. It prepares the frozen experiment, executes the complete evolution loop, and audits the terminal evidence. It never publishes the staged candidate:
 
    ```sh
@@ -49,6 +49,7 @@ Use this flow only for Skill evolution or paper reproduction:
 - Inference Agents use the active Skill and solve tasks. Wiki Maintainers consolidate training traces. Skill Proposers alone propose atomic Skill changes.
 - Inject the complete materialized content of every active Skill into each Inference rollout. A trigger-only or filename-only prompt is a different experiment and must be reported as such.
 - Validation selects candidates. Test never selects, repairs, or tunes them.
+- Operational experiments require at least two independent train episodes, two independent validation episodes, and one held-out test episode. A one-validation-task result is not an optimization claim.
 - Freeze and report the complete active Skill inventory, per-Skill digests, and combined bundle digest. The target Skill digest alone is insufficient.
 - Give each Inference Agent only its current task, active Skills, tools, and output contract; hide ground truth, private scorer data, reference patches, other tasks, candidate decisions, and the evolution Wiki. Keep validation/test trajectories out of the Maintainer and Proposer contexts.
 - Do not change the dataset, scorer, model, baseline, or budget after observing a candidate score. Prepare a new auditable experiment instead.

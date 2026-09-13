@@ -12,6 +12,14 @@ const { applyCandidate, diffCandidate, rollbackReceipt } = require("./publishing
 const { renderInferencePrompt } = require("./prompt-contract");
 const { getContextSkill, listContextSkillReceipts, prepareContext, recordContextSkillUse } = require("./context");
 const { initialPurpose, readSkillFiles, skillBundleDigest, skillSetDigest } = require("./skill-bundle");
+const {
+  aggregateOperationalOutcomes,
+  compareOperationalAggregates,
+  isOperationalAggregate,
+  isOperationalAggregateSaturated,
+  isOperationalOutcome,
+  validateOperationalOutcome
+} = require("./operational-outcome");
 
 const ENGINE_VERSION = require("../package.json").version;
 const DATASET_SCHEMA = "wikiskill.dataset.v1";
@@ -104,6 +112,7 @@ function validateDataset(dataset) {
     if (!["train", "val", "test"].includes(task.split)) blockers.push(`${prefix}.split must be train, val, or test.`);
     if (!("input" in task) || task.input === undefined) blockers.push(`${prefix}.input is required and may contain any serializable domain payload.`);
     if (task.taskContext !== undefined && (typeof task.taskContext !== "string" || !task.taskContext.trim())) blockers.push(`${prefix}.taskContext must be non-empty text when supplied.`);
+    if (task.operational !== undefined && !isRecord(task.operational)) blockers.push(`${prefix}.operational must be an object when supplied.`);
     if (task.knowledge !== undefined) {
       try { require("./knowledge-context").validateKnowledgeRef(task.knowledge); } catch (error) { blockers.push(error.message); }
     }
@@ -247,6 +256,11 @@ const loadModule = (value, base) => {
 };
 const splitTasks = (dataset, split) => dataset.tasks.filter((task) => task.split === split);
 const scoreRange = (score) => typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= 1;
+const validEvaluation = (score) => {
+  if (scoreRange(score)) return true;
+  if (!isOperationalOutcome(score)) return false;
+  try { validateOperationalOutcome(score); return true; } catch { return false; }
+};
 const renderSkillPrompt = (skills) => Object.entries({ ...(skills.target || {}), ...(skills.context || {}) })
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([id, files]) => {
@@ -359,8 +373,8 @@ async function makeTrace({ runRoot, task, split, phase, iteration, attempt, roll
     input: task.input,
     ...(task.outputSchema === undefined ? {} : { outputSchema: task.outputSchema }),
     ...(task.taskContext === undefined ? {} : { taskContext: task.taskContext }),
-    ...(task.sandbox === undefined ? {} : { sandbox: task.sandbox }),
-    ...(task.repositorySnapshot === undefined ? {} : { repositorySnapshot: task.repositorySnapshot })
+    ...(task.operational === undefined ? {} : { operational: task.operational }),
+    ...(task.sandbox === undefined ? {} : { sandbox: task.sandbox })
   };
   const adapterConfig = adapter.config;
   let environment;
@@ -417,7 +431,7 @@ async function makeTrace({ runRoot, task, split, phase, iteration, attempt, roll
     await recordInferenceInvocation?.({ launchRef, taskId: task.id, split, phase, iteration, rollout, ...(provider ? { provider } : {}) });
     const prediction = await (adapter.extractPrediction || defaultAdapter.extractPrediction)({ task: visibleTask, result, split, iteration, adapterConfig });
     const evaluated = await (adapter.score || defaultAdapter.score)({ task, prediction, groundTruth: task.groundTruth, environment, workdir: environmentWorkdir, split, iteration, adapterConfig });
-    if (!scoreRange(evaluated?.score)) throw new WikiSkillError(`Evaluator returned invalid score for ${task.id}.`);
+    if (!validEvaluation(evaluated?.score)) throw new WikiSkillError(`Evaluator returned invalid score for ${task.id}.`);
     if (!isRecord(result) || !Array.isArray(result.events) || result.events.some((event) => !isRecord(event) || !["observation", "assistant", "tool_call", "tool_result"].includes(event.type))) {
       throw new WikiSkillError(`Agent runner returned an invalid trajectory for ${task.id}.`);
     }
@@ -446,7 +460,7 @@ async function makeTrace({ runRoot, task, split, phase, iteration, attempt, roll
       prediction,
       score: evaluated.score,
       ...(workspaceChanges ? { workspace: workspaceChanges } : {}),
-      ...(task.evaluator.capabilityRef === "builtin:command-exit-v1" ? { verification: evaluated.evidence || {} } : {}),
+      ...(["builtin:command-exit-v1", "builtin:operational-milestone-v1"].includes(task.evaluator.capabilityRef) ? { verification: evaluated.evidence || {} } : {}),
       evaluationRef: path.relative(runRoot, evaluationPath).split(path.sep).join("/"),
       evaluationDigest: `sha256:${sha256(evaluationContent)}`
     };
@@ -465,12 +479,48 @@ async function makeTrace({ runRoot, task, split, phase, iteration, attempt, roll
     await (adapter.disposeEnvironment || defaultAdapter.disposeEnvironment)({ task: visibleTask, environment, split, iteration, workdir: environmentWorkdir, adapterConfig });
   }
 }
-const aggregate = (traces) => traces.length ? traces.reduce((sum, item) => sum + item.trace.score, 0) / traces.length : 0;
-const sampleTraces = (traces) => [...traces.filter((item) => item.trace.score < 1).slice(0, 5), ...traces.filter((item) => item.trace.score >= 1).slice(0, 3)];
+const aggregate = (traces) => {
+  if (!traces.length) return 0;
+  if (traces.every((item) => scoreRange(item.trace.score))) return traces.reduce((sum, item) => sum + item.trace.score, 0) / traces.length;
+  if (traces.every((item) => isOperationalOutcome(item.trace.score))) return aggregateOperationalOutcomes(traces);
+  throw new WikiSkillError("Evaluation traces mix numeric and operational outcomes.");
+};
+const successfulTrace = (item) => scoreRange(item.trace.score)
+  ? item.trace.score >= 1
+  : isOperationalOutcome(item.trace.score) && item.trace.score.eligible && item.trace.score.terminalSuccess;
+const sampleTraces = (traces) => [...traces.filter((item) => !successfulTrace(item)).slice(0, 5), ...traces.filter(successfulTrace).slice(0, 3)];
+const aggregateSaturated = (value) => scoreRange(value) ? value === 1 : isOperationalAggregateSaturated(value);
+const assertEligibleAggregate = (value, phase) => {
+  if (isOperationalAggregate(value) && !value.eligible) throw new WikiSkillError(`WikiSkill ${phase} contains an ineligible operational validation.`);
+};
+const compareAggregates = (candidate, baseline) => {
+  if (scoreRange(candidate) && scoreRange(baseline)) return { improves: candidate > baseline, equal: candidate === baseline, order: Math.sign(candidate - baseline), regressions: [] };
+  if (isOperationalAggregate(candidate) && isOperationalAggregate(baseline)) return compareOperationalAggregates(candidate, baseline);
+  throw new WikiSkillError("Baseline and candidate evaluation aggregates use different contracts.");
+};
+const formatEvaluation = (value) => typeof value === "number" ? String(value) : JSON.stringify(value);
 const capLearningText = (value, limit) => {
   if (typeof value !== "string" || value.length <= limit) return value;
   const head = Math.floor(limit / 4);
   return `${value.slice(0, head)}\n[...learning projection truncated...]\n${value.slice(-(limit - head))}`;
+};
+const verificationForLearning = (verification) => {
+  const result = isRecord(verification.verifier) ? verification.verifier : verification;
+  return {
+    commandDigest: sha256(json(verification.command || [])),
+    ...(Array.isArray(verification.milestoneOrder) ? { milestoneOrder: verification.milestoneOrder } : {}),
+    exitCode: result.exitCode,
+    signal: result.signal,
+    timedOut: result.timedOut,
+    outputExceeded: result.outputExceeded,
+    changedPaths: verification.changedPaths,
+    disallowedPaths: verification.disallowedPaths,
+    ...(Array.isArray(result.evidenceRefs) ? { evidenceRefs: result.evidenceRefs } : {}),
+    stdoutDigest: sha256(String(result.stdout || "")),
+    stderrDigest: sha256(String(result.stderr || "")),
+    stdoutBytes: Buffer.byteLength(String(result.stdout || ""), "utf8"),
+    stderrBytes: Buffer.byteLength(String(result.stderr || ""), "utf8")
+  };
 };
 const traceForLearning = (trace) => ({
   schema: trace.schema,
@@ -480,19 +530,7 @@ const traceForLearning = (trace) => ({
   iteration: trace.iteration,
   rollout: trace.rollout,
   score: trace.score,
-  ...(trace.verification ? { verification: {
-    commandDigest: sha256(json(trace.verification.command || [])),
-    exitCode: trace.verification.exitCode,
-    signal: trace.verification.signal,
-    timedOut: trace.verification.timedOut,
-    outputExceeded: trace.verification.outputExceeded,
-    changedPaths: trace.verification.changedPaths,
-    disallowedPaths: trace.verification.disallowedPaths,
-    stdoutDigest: sha256(String(trace.verification.stdout || "")),
-    stderrDigest: sha256(String(trace.verification.stderr || "")),
-    stdoutBytes: Buffer.byteLength(String(trace.verification.stdout || ""), "utf8"),
-    stderrBytes: Buffer.byteLength(String(trace.verification.stderr || ""), "utf8")
-  } } : {}),
+  ...(trace.verification ? { verification: verificationForLearning(trace.verification) } : {}),
   ...(trace.workspace ? { workspace: { ...trace.workspace, diff: capLearningText(trace.workspace.diff, 8_000) } } : {}),
   prediction: trace.prediction,
   events: trace.events.map((event) => ({
@@ -519,7 +557,7 @@ const normalizeProviderSession = (value, label) => {
   if (!sessionId) throw new WikiSkillError(`${label} Provider session id is missing.`);
   return { ref: value.ref.trim(), modelId: value.modelId.trim(), sessionId };
 };
-const wikiIterationLines = (sampled, rawReferencePrefix) => sampled.map((item) => `- ${item.trace.id} (${item.trace.score >= 1 ? "success" : "failure"}, score=${item.trace.score})\n  raw: ${rawReferencePrefix ? `${rawReferencePrefix}/${item.path}` : item.path}`);
+const wikiIterationLines = (sampled, rawReferencePrefix) => sampled.map((item) => `- ${item.trace.id} (${successfulTrace(item) ? "success" : "failure"}, score=${formatEvaluation(item.trace.score)})\n  raw: ${rawReferencePrefix ? `${rawReferencePrefix}/${item.path}` : item.path}`);
 async function appendWikiLog(runRoot, iteration, sampled, rawReferencePrefix) {
   const wiki = path.join(runRoot, "wiki");
   const log = path.join(wiki, "log.md");
@@ -708,8 +746,8 @@ const appendSkillImpact = async ({ runRoot, iteration, attempt, proposal, baseli
     `## Iteration ${iteration} / Attempt ${attempt}`,
     `- target: ${proposal.skillId ?? "none"}`,
     `- proposal: ${proposal.action}`,
-    `- baseline: ${baseline}`,
-    `- candidate: ${candidate}`,
+    `- baseline: ${formatEvaluation(baseline)}`,
+    `- candidate: ${formatEvaluation(candidate)}`,
     `- verdict: ${accepted ? "accepted" : "rejected"}`,
     "",
     "```json",
@@ -956,14 +994,16 @@ async function runEvolution(runOrId, options = {}) {
         for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) valBaseline.push(await makeTrace({ runRoot, task, split: "val", phase: "baseline_validation", iteration: 0, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("iter-00"), recordInferenceInvocation }));
       }
       state.bestValidationScore = aggregate(valBaseline);
+      assertEligibleAggregate(state.bestValidationScore, "baseline validation");
       state.baselineValidationScore = state.bestValidationScore;
+      state.baselineAttempt = attempt;
       await fsp.writeFile(statePath, json(state));
     }
     const max = Math.min(manifest.iterationLimit, options.iterationLimit || manifest.iterationLimit);
     for (let iteration = Math.max(1, state.iteration + 1); iteration <= max; iteration += 1) {
-      if (state.bestValidationScore === 1) {
+      if (aggregateSaturated(state.bestValidationScore)) {
         state.earlyStopped = true;
-        state.earlyStopReason = "validation_score_perfect";
+        state.earlyStopReason = isOperationalAggregate(state.bestValidationScore) ? "dataset_saturated" : "validation_score_perfect";
         break;
       }
       const train = [];
@@ -973,6 +1013,7 @@ async function runEvolution(runOrId, options = {}) {
           train.push(await makeTrace({ runRoot, task, split: "train", phase: "training", iteration, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: undefined, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}`), recordInferenceInvocation }));
         }
       }
+      assertEligibleAggregate(aggregate(train), "training");
       const sampled = sampleTraces(train);
       await runMaintainer(runRoot, iteration, sampled, { ...options, manifest, attempt, recordLearningInvocation });
       const availableTraces = train.map((item) => ({
@@ -988,12 +1029,14 @@ async function runEvolution(runOrId, options = {}) {
       };
       const proposer = resolveLearningRole("proposer", options, manifest);
       if (!proposer) {
-        throw new WikiSkillError("Validation score is below 1.0 but no WikiSkill proposer is configured. Supply learningAgent, proposerModule, or a proposer function.");
+        throw new WikiSkillError("Validation is not saturated but no WikiSkill proposer is configured. Supply learningAgent, proposerModule, or a proposer function.");
       }
       const proposal = await proposer({ iteration, attempt, wikiRoot: path.join(runRoot, "wiki"), skills: await skills(), allowedNewSkillIds: manifest.newSkillIds || [], recordInvocation: recordLearningInvocation, training: train.map((item) => {
         const sourceTask = dataset.tasks.find((candidate) => candidate.id === item.trace.taskId);
         const groundTruthSummary = sourceTask?.evaluator.capabilityRef === "builtin:command-exit-v1"
           ? JSON.stringify({ schema: sourceTask.groundTruth.schema, allowedPaths: sourceTask.groundTruth.allowedPaths || [], passed: item.trace.score === 1 })
+          : sourceTask?.evaluator.capabilityRef === "builtin:operational-milestone-v1"
+            ? JSON.stringify({ schema: sourceTask.groundTruth.schema, outcome: item.trace.score })
           : JSON.stringify(sourceTask?.groundTruth);
         return { trajectoryId: item.trace.id, taskId: item.trace.taskId, prediction: item.trace.prediction, groundTruthSummary, score: item.trace.score };
       }), availableTraces, readTrace });
@@ -1012,7 +1055,9 @@ async function runEvolution(runOrId, options = {}) {
         for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) candidateTraces.push(await makeTrace({ runRoot, task, split: "val", phase: "candidate_validation", iteration, attempt, rollout, skillDigest: await activeSkillDigest(candidateRoot, contextRoot), skills: await skills(candidateRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory(`iter-${String(iteration).padStart(2, "0")}-candidate`), recordInferenceInvocation }));
       }
       const candidateScore = aggregate(candidateTraces);
-      const accepted = candidateScore > state.bestValidationScore;
+      assertEligibleAggregate(candidateScore, "candidate validation");
+      const validationComparison = compareAggregates(candidateScore, state.bestValidationScore);
+      const accepted = validationComparison.improves;
       const proposalDiff = await appendSkillImpact({
         runRoot,
         iteration,
@@ -1034,6 +1079,7 @@ async function runEvolution(runOrId, options = {}) {
           ...(proposal.skillId ? { skillId: proposal.skillId } : {}),
           baselineValidationScore: state.bestValidationScore,
           candidateValidationScore: candidateScore,
+          ...(isOperationalAggregate(candidateScore) ? { validationComparison } : {}),
           accepted,
           proposalPath: path.relative(runRoot, proposalPath).split(path.sep).join("/"),
           proposalDiffDigest: digestText(proposalDiff)
@@ -1055,12 +1101,19 @@ async function runEvolution(runOrId, options = {}) {
       for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) baselineTest.push(await makeTrace({ runRoot, task, split: "test", phase: "baseline_test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(baselineRoot, contextRoot), skills: await skills(baselineRoot), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final-baseline"), recordInferenceInvocation }));
     }
     state.baselineTestScore = aggregate(baselineTest);
+    assertEligibleAggregate(state.baselineTestScore, "held-out baseline");
     const test = [];
     for (const task of splitTasks(dataset, "test")) {
       for (let rollout = 1; rollout <= evaluationRolloutsPerTask; rollout += 1) test.push(await makeTrace({ runRoot, task, split: "test", phase: "final_test", iteration: state.iteration + 1, attempt, rollout, skillDigest: await activeSkillDigest(activeRoot, contextRoot), skills: await skills(), adapter, runner, model, abortSignal, wiki: null, traceDirectory: traceDirectory("final"), recordInferenceInvocation }));
     }
     state.testScore = aggregate(test);
-    state.testGain = state.testScore - state.baselineTestScore;
+    assertEligibleAggregate(state.testScore, "held-out candidate");
+    if (isOperationalAggregate(state.testScore) && isOperationalAggregate(state.baselineTestScore)) {
+      state.testComparison = compareOperationalAggregates(state.testScore, state.baselineTestScore);
+      if (state.testComparison.regressions.length > 0 || state.testComparison.order < 0) state.candidateBlockedReason = "heldout_operational_regression";
+      else delete state.candidateBlockedReason;
+      delete state.testGain;
+    } else state.testGain = state.testScore - state.baselineTestScore;
     state.status = "completed";
     if (options.providerLaunchBudget?.snapshot) state.providerLaunchBudget = options.providerLaunchBudget.snapshot();
     await fsp.writeFile(statePath, json(state));

@@ -111,6 +111,28 @@ test("public dataset validate uses the standalone dataset and scorer contract", 
   assert.match(JSON.parse(invalid.join("")).blockers[0], /privateInput with expected/u);
 });
 
+test("public dataset validate accepts the operational milestone private contract", async () => {
+  const workspace = await temporaryWorkspace();
+  const datasetPath = path.join(workspace, "dataset.json");
+  const task = (id, split) => ({
+    id,
+    split,
+    input: { request: id },
+    groundTruth: {
+      schema: "wikiskill.scorer.operational-milestone.v1",
+      command: [process.execPath, "verify.cjs"],
+      milestoneOrder: ["M0", "M1"],
+      allowedPaths: ["result.json"]
+    },
+    evaluator: { capabilityRef: "builtin:operational-milestone-v1" }
+  });
+  await fs.writeFile(datasetPath, JSON.stringify({ schema: "wikiskill.dataset.v1", tasks: [task("train", "train"), task("val", "val"), task("test", "test")] }));
+  const lines = [];
+  const code = await execute(["dataset", "validate", "--dataset", datasetPath, "--scorer", "builtin:operational-milestone-v1", "--json"], { stdout: (line) => lines.push(line), stderr: () => {} });
+  assert.equal(code, 0, lines.join(""));
+  assert.equal(JSON.parse(lines.join("")).data.scorerRef, "builtin:operational-milestone-v1");
+});
+
 test("zero-source-write init leaves instruction files untouched", async () => {
   const workspace = await temporaryWorkspace();
   await fs.writeFile(path.join(workspace, "AGENTS.md"), "# Owner rules\n");
@@ -189,4 +211,16 @@ test("README documents command-scored coding tasks", async () => {
   assert.match(readme, /"command": \["node", "--test", "value\.test\.cjs"\]/u);
   assert.match(readme, /直接执行且不经过 shell/u);
   assert.match(readme, /Git status\/diff 和[\s\S]*verifier command/u);
+});
+
+test("README documents operational milestone scoring and dataset saturation", async () => {
+  const readme = await fs.readFile(path.join(__dirname, "..", "README.md"), "utf8");
+  assert.match(readme, /builtin:operational-milestone-v1/u);
+  assert.match(readme, /wikiskill\.operational-verifier\.v1/u);
+  assert.match(readme, /dataset_saturated/u);
+  assert.match(readme, /不表示 Skill 完美/u);
+  const coding = readme.slice(readme.indexOf("## Coding Task"), readme.indexOf("## Operational Task"));
+  const operational = readme.slice(readme.indexOf("## Operational Task"), readme.indexOf("## Candidate 发布"));
+  assert.doesNotMatch(coding, /episode:independent-001/u);
+  assert.match(operational, /episode:independent-001/u);
 });

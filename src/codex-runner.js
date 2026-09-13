@@ -160,7 +160,12 @@ const createCodexRunner = (config = {}) => {
     const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-codex-runner-"));
     const schemaPath = path.join(temporaryRoot, "prediction.schema.json");
     const outputPath = path.join(temporaryRoot, "prediction.json");
-    await fs.writeFile(schemaPath, JSON.stringify({ ...PREDICTION_SCHEMA, properties: { prediction: predictionSchema || { type: "string" } } }));
+    const effectivePredictionSchema = predictionSchema || { type: "string" };
+    await fs.writeFile(schemaPath, JSON.stringify({
+      ...PREDICTION_SCHEMA,
+      ...(Object.hasOwn(effectivePredictionSchema, "$defs") ? { $defs: effectivePredictionSchema.$defs } : {}),
+      properties: { prediction: effectivePredictionSchema }
+    }));
     const workspaceWrite = tools.includes("workspace") && config.readOnly !== true;
     const args = [
       ...executableArgs, "exec", "--ephemeral", "--skip-git-repo-check",

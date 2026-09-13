@@ -252,6 +252,74 @@ checkout；Raw trajectory 保存 Provider tool events、Git status/diff 和
 verifier command、退出码、stdout、stderr。评分完成并落盘 Raw 后会删除
 临时 checkout，防止不同 split 互相读取残留环境。
 
+## Operational Task
+
+需要衡量真实任务推进，而不是只判断最终命令是否通过时，使用
+`builtin:operational-milestone-v1`。Inference Agent 获得隔离 Git checkout 和
+`workspace` 工具；私有 verifier 在 Agent 完成后读取真实文件和回执，并输出已经
+通过的连续 milestone 前缀：
+
+```json
+{
+  "operational": {
+    "episodeRef": "episode:independent-001",
+    "objective": "terminal_success",
+    "requiredMilestones": ["M0", "M1", "M2", "M3"]
+  },
+  "groundTruth": {
+    "schema": "wikiskill.scorer.operational-milestone.v1",
+    "command": ["node", "verify-operational.cjs"],
+    "timeoutMs": 120000,
+    "milestoneOrder": ["M0", "M1", "M2", "M3"],
+    "allowedPaths": ["artifacts/result.json"]
+  },
+  "evaluator": { "capabilityRef": "builtin:operational-milestone-v1" }
+}
+```
+
+Verifier 必须退出 `0`，stdout 只能包含一个 JSON 对象，并且自身不得修改 checkout：
+
+```json
+{
+  "schema": "wikiskill.operational-verifier.v1",
+  "verifiedMilestones": ["M0", "M1"],
+  "actionableBlockersRemoved": 1,
+  "diagnosisVerifierPassed": true,
+  "unrecoveredUserChanges": 0,
+  "evidenceRefs": ["artifacts/result.json"]
+}
+```
+
+`evidenceRefs` 必须指向 checkout 内现存的非符号链接文件。Scorer 从 Git diff
+独立计算未授权写入，并返回版本化 operational outcome。Validation 先禁止任何
+episode 丢失 baseline milestone，再按安全性、terminal success、已移除 blocker、
+通过 milestone 数和诊断 verifier 结果做词典序比较。Held-out test 出现 milestone
+回退时不会 stage candidate。
+
+`operational` 是 Inference Agent 可见的目标合同；`episodeRef` 在所有 split 中必须
+唯一，`objective` 为 `terminal_success` 或 `repair_progress`，公开的
+`requiredMilestones` 必须与私有 `milestoneOrder` 完全一致。Publishable dataset
+必须同时包含两类 objective。
+
+Operational publishable experiment 至少需要 2 个 train、2 个 validation 和 1 个
+held-out test episode。全部 validation episode 在 baseline 已达到 terminal success
+时，终态是 `dataset_saturated`；它表示数据集无法继续区分，不表示 Skill 完美。
+
+大型或二进制任务环境使用显式 inventory 创建可重放 snapshot：
+
+```sh
+wikiskill repository snapshot \
+  --repo <prepared-repository> \
+  --inventory <inventory.json> \
+  --output <snapshot.jsonl> \
+  --json
+```
+
+Inventory 只包含 `{"schema":"wikiskill.repository-snapshot-inventory.v1","paths":[...]}`。
+Writer 仅打包列出的现存普通文件，拒绝符号链接、目录穿越和覆盖已有输出；receipt
+返回 snapshot 的 SHA-256 与文件数。Dataset 通过 `repositorySnapshot.path/digest`
+引用它，Inference Agent只看到物化后的 checkout，不接收 snapshot 绝对路径。
+
 ## Candidate 发布
 
 Evolution 不会直接修改 live Skill，而是生成候选：

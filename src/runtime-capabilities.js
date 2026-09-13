@@ -8,6 +8,7 @@ const { createCodexRunner } = require("./codex-runner");
 const codexLearning = require("./codex-learning");
 const claudeLearning = require("./claude-learning");
 const { createCommandExitScorer, validateCommandExitInput } = require("./command-scorer");
+const { createOperationalMilestoneScorer, validateOperationalMilestoneInput } = require("./operational-scorer");
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const canonical = (value) => Array.isArray(value)
@@ -92,6 +93,7 @@ const exactOutputScorer = async ({ prediction, privateInput }) => {
 const validateBuiltinScorerInput = (ref, privateInput) => {
   if (ref === "builtin:exact-output-v1") validateExactOutputInput(privateInput);
   else if (ref === "builtin:command-exit-v1") validateCommandExitInput(privateInput);
+  else if (ref === "builtin:operational-milestone-v1") validateOperationalMilestoneInput(privateInput);
 };
 
 const createBuiltinCapabilityRegistry = () => {
@@ -120,6 +122,12 @@ const createBuiltinCapabilityRegistry = () => {
     implementationVersion: "1",
     implementationDigest: implementationDigestFor(["command-scorer.js"])
   }, () => createCommandExitScorer());
+  registry.registerScorer({
+    ref: "builtin:operational-milestone-v1",
+    apiVersion: "wikiskill.scorer.v1",
+    implementationVersion: "1",
+    implementationDigest: implementationDigestFor(["operational-scorer.js", "command-scorer.js"])
+  }, () => createOperationalMilestoneScorer());
   registry.registerLearningAgent({
     ref: "builtin:codex-cli-v1",
     apiVersion: "wikiskill.learning-agent.v1",

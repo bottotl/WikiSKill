@@ -109,19 +109,41 @@ Keep raw private-scorer stdout, stderr, expected values, and expected-versus-act
 
 For command-scored tasks, use an argv array and bounded timeout. The canonical dataset validator delegates private-input validation to the selected built-in scorer. Keep private expectations in `groundTruth`; pass only task input and the public output schema to the Inference Agent.
 
+### Operational milestone scoring
+
+Use `builtin:operational-milestone-v1` when a task must advance through observable stages. It requires `toolProfile: "workspace"`, one rollout per task, and at least two train, two validation, and one held-out test episode.
+
+Each task also declares public `operational` metadata: a cross-split unique `episodeRef`, an `objective` of `terminal_success` or `repair_progress`, and `requiredMilestones` identical to the private order. A publishable dataset needs both objectives and at least one validation or test terminal-success episode.
+
+The private input contains an argv verifier command, ordered `milestoneOrder`, optional timeout, and authorized relative write paths. The verifier reads the completed isolated checkout and returns `wikiskill.operational-verifier.v1` with:
+
+- `verifiedMilestones`: the continuous prefix that deterministic evidence proves;
+- `actionableBlockersRemoved`: a non-negative integer;
+- `diagnosisVerifierPassed`: a boolean from a deterministic domain check;
+- `unrecoveredUserChanges`: a non-negative integer;
+- `evidenceRefs`: existing non-symlink files inside the checkout.
+
+The verifier must exit successfully, emit exactly one JSON object, and leave the checkout byte-identical. WikiSkill calculates unauthorized writes from Git state rather than trusting the verifier. Any unauthorized write or unrecovered user change makes the attempt ineligible and blocks it from learning or candidate selection.
+
+Operational validation is not a weighted scalar. WikiSkill aggregates episode outcomes in task-id order, rejects any candidate that loses a baseline milestone, then compares safety counts, terminal-success count, blockers removed, verified milestones, and deterministic diagnosis passes lexicographically. Raw audit recomputes these aggregates from trajectories. A held-out regression prevents candidate staging even after validation improvement.
+
+When every validation episode reaches terminal success at baseline, WikiSkill records `dataset_saturated` and skips learning. Collect a new independent episode; never translate that state into `skill_perfect`.
+
 ## Interpret and Publish
 
 - `completed` means the loop reached a terminal result; it does not imply improvement.
 - `no_action` means the proposer found no supported atomic change.
 - A rejected proposal may still add useful Wiki knowledge.
-- A candidate exists only after its validation score strictly exceeds the best prior validation score.
+- A candidate exists only after its validation result strictly exceeds the best prior validation result. Operational comparison also requires no per-episode milestone regression.
 - Test gain reports held-out behavior and must not be used to choose or revise the candidate.
+- `dataset_saturated` means every frozen validation episode already reached terminal success; it does not mean the Skill is perfect.
 
 | Result | Interpretation | Next action |
 | --- | --- | --- |
 | `no_action` | Training evidence supports no atomic change | Keep Wiki evidence and collect more episodes |
+| `dataset_saturated` | Baseline exhausts the current operational dataset | Add a new independent discriminating episode; do not claim the Skill is perfect |
 | Rejected proposal | Candidate did not strictly improve validation | Keep Wiki, discard the Skill change |
-| Accepted candidate | Validation selected it; test is a held-out report, not another gate | Record test unchanged, review the diff, and make the publication decision without tuning on test |
+| Accepted candidate | Validation selected it and held-out operational milestones did not regress | Review the diff and publish without tuning on test |
 
 Inspect every proposal's paths and validation evidence. Reject changes that improve the score by weakening an invariant, changing the scorer, broadening permissions, or encoding a fixture-specific answer.
 

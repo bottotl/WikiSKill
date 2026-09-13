@@ -13,6 +13,7 @@ const { materializeSkillFiles, readSkillFiles, skillBundleDigest, skillSetDigest
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const CONFIG_SCHEMA = "wikiskill.workspace.v1";
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
+const WORKSPACE_SCORERS = new Set(["builtin:command-exit-v1", "builtin:operational-milestone-v1"]);
 
 const digest = (value) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
@@ -158,6 +159,7 @@ const syncPersistentWiki = async (workspace, runRoot, baselineDigest) => {
 
 const stageCandidate = async (workspace, runRoot, targetSkill, baselineDigest, state) => {
   if (!state.acceptedIterations?.length) return null;
+  if (state.candidateBlockedReason === "heldout_operational_regression") return null;
   const source = path.join(runRoot, "result", "skills", targetSkill);
   const resultDigest = await treeDigest(source);
   const candidateId = `candidate-${digest(`${targetSkill}\0${baselineDigest}\0${resultDigest}`).slice("sha256:".length, "sha256:".length + 24)}`;
@@ -252,7 +254,7 @@ const loadExplicitDataset = async (datasetPath, runtimeInput) => {
     throw new Error("Explicit dataset requires model and scorer identities.");
   }
   if (runtimeInput.toolProfile !== "none" && runtimeInput.toolProfile !== "workspace") throw new Error("Explicit dataset tool profile must be none or workspace.");
-  if (runtimeInput.scorerRef === "builtin:command-exit-v1" && runtimeInput.toolProfile !== "workspace") throw new Error("builtin:command-exit-v1 requires the workspace tool profile.");
+  if (WORKSPACE_SCORERS.has(runtimeInput.scorerRef) && runtimeInput.toolProfile !== "workspace") throw new Error(`${runtimeInput.scorerRef} requires the workspace tool profile.`);
   if (runtimeInput.scorerRef === "builtin:exact-output-v1" && runtimeInput.toolProfile !== "none") throw new Error("builtin:exact-output-v1 requires the none tool profile.");
   const core = require("./index");
   const dataset = core.validateDataset(JSON.parse(await fs.readFile(target, "utf8")));
@@ -271,13 +273,14 @@ const loadExplicitDataset = async (datasetPath, runtimeInput) => {
 };
 
 const initializeTaskRepository = async (workdir, sandbox) => {
-  await prepareTaskDependencies(workdir, sandbox);
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: workdir });
   execFileSync("git", ["config", "user.email", "wikiskill@example.invalid"], { cwd: workdir });
   execFileSync("git", ["config", "user.name", "WikiSkill"], { cwd: workdir });
   await fs.writeFile(path.join(workdir, ".git", "info", "exclude"), "node_modules/\n");
-  execFileSync("git", ["add", "."], { cwd: workdir });
+  // Freeze every supplied input even when the task's own .gitignore matches it.
+  execFileSync("git", ["add", "-f", "."], { cwd: workdir });
   execFileSync("git", ["commit", "--allow-empty", "-qm", "初始化练习仓库"], { cwd: workdir });
+  await prepareTaskDependencies(workdir, sandbox);
   return workdir;
 };
 
@@ -304,7 +307,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     reasoningEffort,
     limit: maxProviderLaunches
   });
-  const toolProfile = options.toolProfile ?? (options.scorerRef === "builtin:command-exit-v1" ? "workspace" : "none");
+  const toolProfile = options.toolProfile ?? (WORKSPACE_SCORERS.has(options.scorerRef) ? "workspace" : "none");
   const explicit = await loadExplicitDataset(options.datasetPath, { provider: options.provider, modelId: options.modelId, reasoningEffort, scorerRef: options.scorerRef, toolProfile });
   const selection = explicit.selection;
   if (options.expectedDatasetDigest !== undefined) {
@@ -379,9 +382,9 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     runtime = { runnerRef, scorerRef: selection.cohort.scorerRef, provider: selection.cohort.provider, modelId: selection.cohort.modelId, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches }, runner: resolvedRunner.descriptor, scorer: resolvedScorer.descriptor };
     runtimeRunner = resolvedRunner.run;
     runtimeAdapter = {
-      prepareEnvironment: async ({ workdir, task }) => runtime.scorerRef === "builtin:command-exit-v1" ? initializeTaskRepository(workdir, task.repositorySnapshot ? await require("./repository-snapshot").snapshotDependencyFiles(task.repositorySnapshot) : task.sandbox) : workdir,
+      prepareEnvironment: async ({ workdir, task }) => WORKSPACE_SCORERS.has(runtime.scorerRef) ? initializeTaskRepository(workdir, task.repositorySnapshot ? await require("./repository-snapshot").snapshotDependencyFiles(task.repositorySnapshot) : task.sandbox) : workdir,
       resolveTools: () => runtime.toolProfile === "workspace" ? ["workspace"] : [],
-      disposeEnvironment: ({ workdir }) => runtime.scorerRef === "builtin:command-exit-v1" ? fs.rm(workdir, { recursive: true, force: true }) : undefined,
+      disposeEnvironment: ({ workdir }) => WORKSPACE_SCORERS.has(runtime.scorerRef) ? fs.rm(workdir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) : undefined,
       score: ({ task, prediction, groundTruth, environment, workdir, split, iteration }) => {
         if (task.evaluator.capabilityRef !== runtime.scorerRef) throw new Error(`Task scorer ref differs from the frozen runtime cohort: ${task.id}`);
         return resolvedScorer.score({ taskId: task.id, prediction, privateInput: groundTruth, environment, workdir, split, iteration });
@@ -445,7 +448,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     proposer: runtimeLearning ? digest(JSON.stringify({ descriptor: runtimeLearning.descriptor, config: runtimeLearningFrozenConfig })) : await componentDigest(options.proposer || learningAgent, proposerModule, learningAgent),
     model: digest(JSON.stringify(model))
   };
-  const rolloutPolicy = runtime?.scorerRef === "builtin:command-exit-v1"
+  const rolloutPolicy = WORKSPACE_SCORERS.has(runtime?.scorerRef)
     ? { trainingRolloutsPerTask: 1, evaluationRolloutsPerTask: 1 }
     : runtimeRunner && runtimeAdapter
       ? { trainingRolloutsPerTask: 2, evaluationRolloutsPerTask: 3 }

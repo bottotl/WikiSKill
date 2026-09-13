@@ -52,6 +52,31 @@ const auditExperiment = ({ tasks, targetSkill, skillContext, baseline, mode = "p
   else warnings.push("Smoke has no frozen evolution baseline; it cannot support candidate publication.");
   if (!Array.isArray(tasks)) blockers.push("Experiment audit requires a canonically validated task array.");
   const splitCounts = Object.fromEntries(["train", "val", "test"].map((split) => [split, (tasks || []).filter((task) => task.split === split).length]));
+  const operational = (tasks || []).some((task) => task?.evaluator?.capabilityRef === "builtin:operational-milestone-v1");
+  if (operational && strict && (splitCounts.train < 2 || splitCounts.val < 2 || splitCounts.test < 1)) {
+    blockers.push("Operational experiments require at least 2 train and 2 val episodes plus 1 held-out test episode.");
+  }
+  if (operational && strict) {
+    const operationalTasks = (tasks || []).filter((task) => task?.evaluator?.capabilityRef === "builtin:operational-milestone-v1");
+    const episodeRefs = [];
+    for (const task of operationalTasks) {
+      const metadata = task.operational;
+      if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)
+        || typeof metadata.episodeRef !== "string" || !metadata.episodeRef.trim()
+        || !["terminal_success", "repair_progress"].includes(metadata.objective)
+        || !Array.isArray(metadata.requiredMilestones)
+        || metadata.requiredMilestones.length === 0
+        || metadata.requiredMilestones.some((value) => typeof value !== "string" || !value)) {
+        blockers.push(`${task.id}: operational metadata must declare episodeRef, objective, and requiredMilestones.`);
+        continue;
+      }
+      episodeRefs.push(metadata.episodeRef);
+      if (JSON.stringify(metadata.requiredMilestones) !== JSON.stringify(task.groundTruth?.milestoneOrder)) blockers.push(`${task.id}: public requiredMilestones differ from the private scorer milestoneOrder.`);
+    }
+    if (new Set(episodeRefs).size !== episodeRefs.length) blockers.push("Operational episodeRef values must be unique across splits.");
+    if (!operationalTasks.some((task) => task.operational?.objective === "repair_progress")) blockers.push("Operational experiments require at least one repair_progress episode.");
+    if (!operationalTasks.some((task) => ["val", "test"].includes(task.split) && task.operational?.objective === "terminal_success")) blockers.push("Operational experiments require at least one validation or test terminal_success episode.");
+  }
   for (const [split, count] of Object.entries(splitCounts)) if (count === 1) warnings.push(`Dataset has only one ${split} task; treat results as a smoke unless independence is established externally.`);
   return { blockers: [...new Set(blockers)], warnings: [...new Set(warnings)], splitCounts };
 };

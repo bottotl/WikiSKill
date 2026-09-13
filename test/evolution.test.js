@@ -12,7 +12,9 @@ const { configureEvolution, evolveWorkspace, statusWorkspaceEvolution } = requir
 const { validateDataset } = require("../src/index");
 const { createCapabilityRegistry } = require("../src/runtime-capabilities");
 const { createCommandExitScorer } = require("../src/command-scorer");
+const { createOperationalMilestoneScorer } = require("../src/operational-scorer");
 const { initWorkspace } = require("../src/workspace");
+const { auditRun } = require("../src/audit/run");
 
 const tasks = () => [
   ...[1, 2, 3, 4].map((index) => ({
@@ -119,6 +121,198 @@ test("explicit dataset runs the paper loop and stages a strict-gain candidate", 
   assert.match(await fs.readFile(path.join(workspace, ".wikiskill/wiki/patterns/procedure.md"), "utf8"), /old procedure fails/u);
   assert.equal(await fs.access(path.join(workspace, result.rawRef, "raw", "traces")).then(() => true), true);
   assert.equal(JSON.parse(await fs.readFile(path.join(result.runRoot, "result", "raw-authority.json"), "utf8")).rawDigest, result.rawDigest);
+});
+
+test("operational outcomes stage a candidate only after strict milestone improvement", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const operationalRunner = async ({ task, skills }) => ({
+    prediction: { improved: skills.target["target-skill"]["SKILL.md"].includes("improved procedure") },
+    events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+  });
+  const operationalAdapter = {
+    ...adapter,
+    score: ({ prediction }) => {
+      const verifiedMilestones = prediction.improved ? ["M0", "M1", "M2"] : ["M0", "M1"];
+      return {
+        score: {
+          schema: "wikiskill.operational-outcome.v1",
+          eligible: true,
+          terminalSuccess: prediction.improved,
+          verifiedMilestones,
+          highestVerifiedMilestone: verifiedMilestones.length - 1,
+          verifiedMilestoneCount: verifiedMilestones.length,
+          actionableBlockersRemoved: prediction.improved ? 1 : 0,
+          unauthorizedWrites: 0,
+          unrecoveredUserChanges: 0,
+          diagnosisVerifierPassed: true
+        },
+        evidence: { source: "test-harness" }
+      };
+    }
+  };
+
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-strict-gain",
+    adapter: operationalAdapter,
+    runner: operationalRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+
+  assert.equal(result.state.baselineValidationScore.schema, "wikiskill.operational-aggregate.v1");
+  assert.equal(result.state.baselineValidationScore.verifiedMilestoneCount, 2);
+  assert.equal(result.state.bestValidationScore.terminalSuccessCount, 1);
+  assert.deepEqual(result.state.acceptedIterations, [1]);
+  assert.equal(result.state.baselineTestScore.terminalSuccessCount, 0);
+  assert.equal(result.state.testScore.terminalSuccessCount, 1);
+  assert.equal(result.candidate.status, "validation_accepted");
+});
+
+test("operational held-out milestone regression prevents candidate staging", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const operationalRunner = async ({ task, skills }) => {
+    const improved = skills.target["target-skill"]["SKILL.md"].includes("improved procedure");
+    const regressedTest = task.split === "test" && improved;
+    const verifiedMilestones = regressedTest ? ["M0"] : improved || task.split === "test" ? ["M0", "M1", "M2"] : ["M0", "M1"];
+    return {
+      prediction: { verifiedMilestones, terminalSuccess: verifiedMilestones.length === 3 },
+      events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+    };
+  };
+  const operationalAdapter = {
+    ...adapter,
+    score: ({ prediction }) => ({
+      score: {
+        schema: "wikiskill.operational-outcome.v1",
+        eligible: true,
+        terminalSuccess: prediction.terminalSuccess,
+        verifiedMilestones: prediction.verifiedMilestones,
+        highestVerifiedMilestone: prediction.verifiedMilestones.length - 1,
+        verifiedMilestoneCount: prediction.verifiedMilestones.length,
+        actionableBlockersRemoved: 0,
+        unauthorizedWrites: 0,
+        unrecoveredUserChanges: 0,
+        diagnosisVerifierPassed: true
+      },
+      evidence: { source: "test-harness" }
+    })
+  };
+
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-heldout-regression",
+    adapter: operationalAdapter,
+    runner: operationalRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+
+  assert.deepEqual(result.state.acceptedIterations, [1]);
+  assert.deepEqual(result.state.testComparison.regressions, [{ taskId: "test", lostMilestones: ["M1", "M2"] }]);
+  assert.equal(result.candidate, null);
+});
+
+test("terminal operational baseline reports dataset saturation without learning", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const terminalAdapter = {
+    ...adapter,
+    score: () => ({
+      score: {
+        schema: "wikiskill.operational-outcome.v1",
+        eligible: true,
+        terminalSuccess: true,
+        verifiedMilestones: ["M0"],
+        highestVerifiedMilestone: 0,
+        verifiedMilestoneCount: 1,
+        actionableBlockersRemoved: 0,
+        unauthorizedWrites: 0,
+        unrecoveredUserChanges: 0,
+        diagnosisVerifierPassed: true
+      }
+    })
+  };
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-dataset-saturated",
+    adapter: terminalAdapter,
+    runner,
+    maintainer: async () => { throw new Error("dataset saturation must skip Maintainer"); },
+    proposer: async () => { throw new Error("dataset saturation must skip Proposer"); },
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+  assert.equal(result.state.earlyStopped, true);
+  assert.equal(result.state.earlyStopReason, "dataset_saturated");
+  assert.deepEqual(result.state.acceptedIterations, []);
+  assert.equal(result.candidate, null);
+});
+
+test("ineligible operational validation is retained as Raw evidence before blocking", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const ineligibleAdapter = {
+    ...adapter,
+    score: () => ({
+      score: {
+        schema: "wikiskill.operational-outcome.v1",
+        eligible: false,
+        terminalSuccess: false,
+        verifiedMilestones: [],
+        highestVerifiedMilestone: -1,
+        verifiedMilestoneCount: 0,
+        actionableBlockersRemoved: 0,
+        unauthorizedWrites: 1,
+        unrecoveredUserChanges: 0,
+        diagnosisVerifierPassed: false
+      },
+      evidence: { disallowedPaths: ["user-file"] }
+    })
+  };
+  await assert.rejects(evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-ineligible",
+    adapter: ineligibleAdapter,
+    runner,
+    maintainer: async () => { throw new Error("ineligible trace must not reach Maintainer"); },
+    proposer: async () => { throw new Error("ineligible trace must not reach Proposer"); },
+    model: { id: "test-model" },
+    iterationLimit: 1
+  }), /ineligible operational validation/u);
+  const rawTrace = path.join(workspace, ".wikiskill", "raw", "evolutions", "operational-ineligible", "raw", "traces", "iter-00", "val", "validation.json");
+  assert.equal(await fs.access(rawTrace).then(() => true, () => false), true);
+  assert.equal(JSON.parse(await fs.readFile(rawTrace, "utf8")).score.eligible, false);
 });
 
 
@@ -826,4 +1020,107 @@ test("development runtime records code diff, tool events, and command verificati
   assert.equal(evolvedTest.initialSource, "module.exports = () => 'wrong';\n");
   assert.equal(await fs.access(baselineTest.workdir).then(() => true, () => false), false);
   assert.equal(await fs.access(evolvedTest.workdir).then(() => true, () => false), false);
+});
+
+test("operational runtime scores externally verified workspace milestones", async () => {
+  const { workspace, stateRoot } = await setup();
+  const operationalTask = (id, split) => ({
+    id,
+    split,
+    input: { instruction: "Advance the isolated workflow by updating progress.json.", caseId: id },
+    outputSchema: { type: "object", additionalProperties: false, required: ["summary"], properties: { summary: { type: "string" } } },
+    sandbox: {
+      ".gitignore": "progress.json\n",
+      "progress.json": "{\"level\":0}\n",
+      "verify.cjs": `
+const fs = require("node:fs");
+const level = JSON.parse(fs.readFileSync("progress.json", "utf8")).level;
+const order = ["M0", "M1", "M2"];
+process.stdout.write(JSON.stringify({
+  schema: "wikiskill.operational-verifier.v1",
+  verifiedMilestones: order.slice(0, Math.max(0, Math.min(order.length, level))),
+  actionableBlockersRemoved: level >= 3 ? 1 : 0,
+  diagnosisVerifierPassed: level >= 1,
+  unrecoveredUserChanges: 0,
+  evidenceRefs: ["progress.json"]
+}));
+`
+    },
+    groundTruth: {
+      schema: "wikiskill.scorer.operational-milestone.v1",
+      command: [process.execPath, "verify.cjs"],
+      milestoneOrder: ["M0", "M1", "M2"],
+      allowedPaths: ["progress.json"]
+    },
+    operational: {
+      episodeRef: `episode:${id}`,
+      objective: id === "op-train-1" ? "repair_progress" : "terminal_success",
+      requiredMilestones: ["M0", "M1", "M2"]
+    },
+    evaluator: { capabilityRef: "builtin:operational-milestone-v1" }
+  });
+  const datasetPath = path.join(workspace, "operational-dataset.json");
+  await fs.writeFile(datasetPath, `${JSON.stringify({
+    schema: "wikiskill.dataset.v1",
+    domain: "operational-fixture",
+    tasks: [
+      operationalTask("op-train-1", "train"), operationalTask("op-train-2", "train"),
+      operationalTask("op-val-1", "val"), operationalTask("op-val-2", "val"),
+      operationalTask("op-test-1", "test")
+    ]
+  }, null, 2)}\n`);
+  let launches = 0;
+  let operationalProjection;
+  const registry = createCapabilityRegistry();
+  registry.registerRunner({ ref: "provider:claude", apiVersion: "wikiskill.runner.v1", implementationVersion: "test", implementationDigest: `sha256:${"a".repeat(64)}` }, () => async ({ task, workdir, skills, tools }) => {
+    assert.deepEqual(tools, ["workspace"]);
+    assert.deepEqual(task.operational.requiredMilestones, ["M0", "M1", "M2"]);
+    const improved = skills.target["target-skill"]["SKILL.md"].includes("improved procedure");
+    await fs.writeFile(path.join(workdir, "progress.json"), `${JSON.stringify({ level: improved ? 3 : 1 })}\n`);
+    return {
+      prediction: { summary: improved ? "advanced to terminal success" : "captured the initial diagnosis" },
+      events: [{ type: "tool_call", tool: "editor", input: { file: "progress.json" } }, { type: "tool_result", tool: "editor", output: "updated" }],
+      provider: { ref: "provider:claude", modelId: "test-model", sessionId: `op-session-${++launches}` }
+    };
+  });
+  registry.registerScorer({ ref: "builtin:operational-milestone-v1", apiVersion: "wikiskill.scorer.v1", implementationVersion: "test", implementationDigest: `sha256:${"b".repeat(64)}` }, () => createOperationalMilestoneScorer());
+  registry.registerLearningAgent({ ref: "provider:claude-learning", apiVersion: "wikiskill.learning-agent.v1", implementationVersion: "test", implementationDigest: `sha256:${"c".repeat(64)}` }, () => ({
+    maintainer,
+    proposer: async (input) => {
+      operationalProjection = input.readTrace(input.availableTraces[0].id);
+      return proposer(input);
+    }
+  }));
+  registry.seal();
+
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "builtin:operational-milestone-v1",
+    stateRoot,
+    runId: "operational-runtime",
+    capabilityRegistry: registry,
+    iterationLimit: 1
+  });
+
+  assert.equal(result.state.baselineValidationScore.verifiedMilestoneCount, 2);
+  assert.equal(result.state.bestValidationScore.verifiedMilestoneCount, 6);
+  assert.equal(result.state.bestValidationScore.terminalSuccessCount, 2);
+  assert.deepEqual(result.state.acceptedIterations, [1]);
+  assert.equal(result.state.testComparison.improves, true);
+  assert.equal(result.candidate.status, "validation_accepted");
+  const trace = JSON.parse(await fs.readFile(path.join(workspace, result.rawRef, "raw", "traces", "iter-01-candidate", "val", "op-val-1.json"), "utf8"));
+  assert.deepEqual(trace.verification.milestoneOrder, ["M0", "M1", "M2"]);
+  assert.match(trace.workspace.diff, /"level":3/u);
+  assert.deepEqual(operationalProjection.verification.milestoneOrder, ["M0", "M1", "M2"]);
+  assert.equal(operationalProjection.verification.exitCode, 0);
+  assert.equal(operationalProjection.verification.command, undefined);
+  assert.deepEqual(auditRun(result.runRoot, { workspace }).blockers, []);
+
+  const statePath = path.join(result.runRoot, "runs", "state.json");
+  const tampered = JSON.parse(await fs.readFile(statePath, "utf8"));
+  tampered.bestValidationScore.verifiedMilestoneCount += 1;
+  await fs.writeFile(statePath, `${JSON.stringify(tampered, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace }).blockers.join("\n"), /best validation aggregate does not match Raw traces/u);
 });

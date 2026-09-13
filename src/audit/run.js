@@ -3,10 +3,18 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { aggregateOperationalOutcomes, compareOperationalAggregates, isOperationalAggregate, isOperationalAggregateSaturated, isOperationalOutcome, validateOperationalOutcome } = require("../operational-outcome");
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
 const readJson = (target) => JSON.parse(fs.readFileSync(target, "utf8"));
 const sha256 = (value) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
+const numericScore = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
+const compare = (candidate, baseline) => {
+  if (numericScore(candidate) && numericScore(baseline)) return { improves: candidate > baseline, equal: candidate === baseline, order: Math.sign(candidate - baseline), regressions: [] };
+  if (isOperationalAggregate(candidate) && isOperationalAggregate(baseline)) return compareOperationalAggregates(candidate, baseline);
+  return null;
+};
+const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 
 const visitJson = (root) => {
   const files = [];
@@ -64,6 +72,17 @@ const auditRun = (runRoot, { workspace } = {}) => {
   if (new Set(traces.map((trace) => trace.id)).size !== traces.length) blockers.push("Raw trajectories contain duplicate ids across iterations or attempts.");
   for (const trace of traces) if (phaseSplits[trace.phase] !== trace.split) blockers.push(`${trace.id}: trajectory phase ${String(trace.phase)} does not match split ${String(trace.split)}.`);
   const traceById = new Map(traces.map((trace) => [trace.id, trace]));
+  const operationalTraces = traces.filter((trace) => isOperationalOutcome(trace.score));
+  const operationalRun = operationalTraces.length > 0 || [state.baselineValidationScore, state.bestValidationScore, state.baselineTestScore, state.testScore].some(isOperationalAggregate);
+  if (operationalRun && operationalTraces.length !== traces.length) blockers.push("Operational run mixes numeric, missing, or operational trajectory outcomes.");
+  for (const trace of operationalTraces) {
+    try { validateOperationalOutcome(trace.score); } catch (error) { blockers.push(`${trace.id}: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  const aggregatePhase = (phase, predicate = () => true) => {
+    const selected = operationalTraces.filter((trace) => trace.phase === phase && predicate(trace));
+    if (!selected.length) return null;
+    try { return aggregateOperationalOutcomes(selected.map((trace) => ({ trace }))); } catch (error) { blockers.push(`${phase}: ${error instanceof Error ? error.message : String(error)}`); return null; }
+  };
 
   const inferenceInvocations = state.inferenceInvocations || [];
   const learningInvocations = state.learningInvocations || [];
@@ -74,9 +93,16 @@ const auditRun = (runRoot, { workspace } = {}) => {
     else if (testPhaseStarted) blockers.push(`${invocation.launchRef}: non-test inference ran after final test evaluation started.`);
   }
 
+  const rawBaselineValidation = operationalRun ? aggregatePhase("baseline_validation", (trace) => trace.attempt === (state.baselineAttempt ?? 1)) : null;
+  if (operationalRun && (!rawBaselineValidation || !same(rawBaselineValidation, state.baselineValidationScore))) blockers.push("Run state baseline validation aggregate does not match Raw traces.");
   let best = state.baselineValidationScore;
   for (const history of state.proposalHistory || []) {
-    const improves = typeof history.candidateValidationScore === "number" && typeof best === "number" && history.candidateValidationScore > best;
+    const rawCandidate = operationalRun ? aggregatePhase("candidate_validation", (trace) => trace.iteration === history.iteration && trace.attempt === history.attempt) : null;
+    if (operationalRun && (!rawCandidate || !same(rawCandidate, history.candidateValidationScore))) blockers.push(`Iteration ${history.iteration} candidate validation aggregate does not match Raw traces.`);
+    const comparison = compare(history.candidateValidationScore, best);
+    const improves = comparison?.improves === true;
+    if (!comparison) blockers.push(`Iteration ${history.iteration} validation aggregates use incompatible contracts.`);
+    if (comparison && isOperationalAggregate(history.candidateValidationScore) && !same(history.validationComparison, comparison)) blockers.push(`Iteration ${history.iteration} operational validation comparison does not match its aggregates.`);
     if (history.accepted !== improves) blockers.push(`Iteration ${history.iteration} acceptance does not match strict validation gain.`);
     if (history.accepted) best = history.candidateValidationScore;
     const proposal = readJson(path.join(runRoot, history.proposalPath));
@@ -88,6 +114,7 @@ const auditRun = (runRoot, { workspace } = {}) => {
       else if (trace.iteration !== history.iteration || trace.attempt !== history.attempt) blockers.push(`Proposal reads trace ${traceId} from iteration/attempt ${trace.iteration}/${trace.attempt}, expected ${history.iteration}/${history.attempt}.`);
     }
   }
+  if (operationalRun && !same(best, state.bestValidationScore)) blockers.push("Run state best validation aggregate does not match Raw traces.");
 
   if ((taskSet.tasks || []).some((task) => task.split === "test")) {
     const testInvocations = inferenceInvocations.filter((item) => item.split === "test");
@@ -99,7 +126,20 @@ const auditRun = (runRoot, { workspace } = {}) => {
   }
 
   for (const field of ["baselineValidationScore", "bestValidationScore", "baselineTestScore", "testScore"]) {
-    if (typeof state[field] !== "number" || !Number.isFinite(state[field]) || state[field] < 0 || state[field] > 1) blockers.push(`Run state ${field} must be a score between 0 and 1.`);
+    if (!numericScore(state[field]) && !isOperationalAggregate(state[field])) blockers.push(`Run state ${field} must be a score between 0 and 1 or an operational aggregate.`);
+  }
+  if (isOperationalAggregate(state.baselineTestScore) || isOperationalAggregate(state.testScore)) {
+    const rawBaselineTest = aggregatePhase("baseline_test", (trace) => trace.attempt === state.attempt);
+    const rawTest = aggregatePhase("final_test", (trace) => trace.attempt === state.attempt);
+    if (!rawBaselineTest || !same(rawBaselineTest, state.baselineTestScore)) blockers.push("Run state baseline test aggregate does not match Raw traces.");
+    if (!rawTest || !same(rawTest, state.testScore)) blockers.push("Run state final test aggregate does not match Raw traces.");
+    const comparison = compare(state.testScore, state.baselineTestScore);
+    if (!comparison || !same(state.testComparison, comparison)) blockers.push("Run state operational test comparison does not match its aggregates.");
+    const regressed = comparison && (comparison.regressions.length > 0 || comparison.order < 0);
+    if (regressed !== (state.candidateBlockedReason === "heldout_operational_regression")) blockers.push("Run state held-out operational candidate gate does not match test comparison.");
+  }
+  if (state.earlyStopReason === "dataset_saturated" && !isOperationalAggregateSaturated(state.baselineValidationScore)) {
+    blockers.push("Run state dataset_saturated does not match its baseline validation aggregate.");
   }
 
   return {
