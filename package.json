@@ -1,8 +1,16 @@
 {
-  "name": "wikiskill",
+  "name": "@jft0m/wikiskill",
   "version": "0.1.0",
   "description": "Standalone WikiSkill evolution engine",
   "type": "commonjs",
+  "main": "./src/standalone-client.js",
+  "types": "./src/standalone-client.d.cts",
+  "exports": {
+    ".": {
+      "types": "./src/standalone-client.d.cts",
+      "default": "./src/standalone-client.js"
+    }
+  },
   "files": [
     "acceptance",
     "bin",
