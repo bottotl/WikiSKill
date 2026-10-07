@@ -5,15 +5,82 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { aggregateOperationalOutcomes, compareOperationalAggregates, isOperationalAggregate, isOperationalAggregateSaturated, isOperationalOutcome, validateOperationalOutcome } = require("../operational-outcome");
 const { sortedFiles, treeDigest } = require("../evolution");
+const { skillBundleDigest, skillSetDigest } = require("../skill-bundle");
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
+const HEX64 = /^[0-9a-f]{64}$/u;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const RESULT_SEMANTIC_KEYS = ["engine", "configDigest", "dataset", "adapterDigest", "runnerDigest", "modelDigest", "proposalHistory", "baselineValidationScore", "finalValidationScore", "testScore", "acceptedIterations", "earlyStopped", "earlyStopReason", "changesPatchDigest", "reversePatchDigest"];
 const readJson = (target) => JSON.parse(fs.readFileSync(target, "utf8"));
 const sha256 = (value) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
 const sha256Hex = (value) => crypto.createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
 const canonicalJson = (value) => `${JSON.stringify(value, null, 2)}\n`;
-const skillTreeDigest = (root, excludedFiles) => treeDigest(root, sortedFiles(root).filter((file) => !excludedFiles.has(path.relative(root, file).split(path.sep).join("/"))));
+const relativeTo = (root, file) => path.relative(root, file).split(path.sep).join("/");
+const skillTreeDigest = (root, excludedFiles) => treeDigest(root, sortedFiles(root).filter((file) => !excludedFiles.has(relativeTo(root, file))));
+const fileDigestMap = (root, excludedFiles) => Object.fromEntries(sortedFiles(root).filter((file) => !excludedFiles.has(relativeTo(root, file))).map((file) => [relativeTo(root, file), sha256Hex(fs.readFileSync(file, "utf8"))]));
+const isDigestMap = (value) => value !== null && typeof value === "object" && !Array.isArray(value) && Object.values(value).every((entry) => typeof entry === "string" && HEX64.test(entry));
+const isSafeRelativePath = (file) => typeof file === "string" && file !== "" && !file.startsWith("/") && !file.includes("\\") && !file.split("/").includes("..");
+const safeFileKeys = (value) => Object.keys(value).every(isSafeRelativePath);
+const safeFileList = (value) => Array.isArray(value) && value.every(isSafeRelativePath);
+const sameDigestMap = (left, right) => {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return JSON.stringify(leftKeys) === JSON.stringify(rightKeys) && leftKeys.every((key) => left[key] === right[key]);
+};
+const isApplyEntry = (entry) => Boolean(entry) && typeof entry === "object"
+  && SAFE_ID.test(entry.skillId || "")
+  && isSafeRelativePath(entry.sourcePath)
+  && (entry.operation === "create" || entry.operation === "update")
+  && isDigestMap(entry.finalFiles)
+  && isDigestMap(entry.baselineFiles)
+  && safeFileKeys(entry.finalFiles)
+  && safeFileKeys(entry.baselineFiles)
+  && safeFileList(entry.files)
+  && safeFileList(entry.deletedFiles);
+const readSkillFilesSync = (root) => {
+  const files = {};
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      const target = path.join(current, entry.name);
+      if (entry.isSymbolicLink()) throw new Error(`Skill bundles do not allow symlinks: ${target}`);
+      if (entry.isDirectory()) walk(target);
+      else if (entry.isFile()) files[relativeTo(root, target)] = fs.readFileSync(target, "utf8");
+    }
+  };
+  walk(root);
+  return files;
+};
+const materializedInventory = (roots) => {
+  const inventory = [];
+  for (const root of roots) {
+    for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+      if (!entry.isDirectory()) continue;
+      if (inventory.some((skill) => skill.id === entry.name)) throw new Error(`Duplicate active Skill id: ${entry.name}.`);
+      inventory.push({ id: entry.name, bundleDigest: skillBundleDigest(readSkillFilesSync(path.join(root, entry.name))) });
+    }
+  }
+  return inventory.sort((left, right) => left.id.localeCompare(right.id));
+};
+const rebuildPatch = (runRoot, entries, reverse) => {
+  const blocks = [];
+  for (const entry of entries) {
+    const baselineRoot = path.join(runRoot, "skills", "snapshots", entry.skillId);
+    const finalRoot = path.join(runRoot, "result", "skills", entry.skillId);
+    const files = new Set([...Object.keys(entry.baselineFiles), ...Object.keys(entry.finalFiles)]);
+    for (const file of [...files].sort()) {
+      const before = entry.operation === "create" ? "" : fs.existsSync(path.join(baselineRoot, file)) ? fs.readFileSync(path.join(baselineRoot, file), "utf8") : "";
+      const after = fs.existsSync(path.join(finalRoot, file)) ? fs.readFileSync(path.join(finalRoot, file), "utf8") : "";
+      if (before === after) continue;
+      const target = `${entry.sourcePath}/${file}`;
+      const from = reverse ? after : before;
+      const to = reverse ? before : after;
+      const removed = from.split("\n").map((line) => line ? `-${line}` : "-").join("\n");
+      const added = to.split("\n").map((line) => line ? `+${line}` : "+").join("\n");
+      blocks.push(`diff --git a/${target} b/${target}\n--- a/${target}\n+++ b/${target}\n@@\n${removed}\n${added}\n`);
+    }
+  }
+  return blocks.join("");
+};
 const numericScore = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 const compare = (candidate, baseline) => {
   if (numericScore(candidate) && numericScore(baseline)) return { improves: candidate > baseline, equal: candidate === baseline, order: Math.sign(candidate - baseline), regressions: [] };
@@ -130,6 +197,8 @@ const auditRun = (runRoot, { workspace, candidate } = {}) => {
     }
   }
   if (operationalRun && !same(best, state.bestValidationScore)) blockers.push("Run state best validation aggregate does not match Raw traces.");
+  const derivedAcceptedIterations = (state.proposalHistory || []).filter((history) => history.accepted === true).map((history) => history.iteration);
+  if (!same(state.acceptedIterations || [], derivedAcceptedIterations)) blockers.push("Run state accepted iterations do not match the accepted proposal history.");
 
   if ((taskSet.tasks || []).some((task) => task.split === "test")) {
     const testInvocations = inferenceInvocations.filter((item) => item.split === "test");
@@ -165,9 +234,13 @@ const auditRun = (runRoot, { workspace, candidate } = {}) => {
       try {
         const candidateRoot = path.join(path.resolve(workspace), ".wikiskill", "candidates", candidate);
         const staged = readJson(path.join(candidateRoot, "candidate.json"));
-        const [targetSkill] = manifest.targetSkills || [];
+        const declaredTargetIds = new Set((manifest.targetSkills || []).map((skill) => typeof skill?.id === "string" ? skill.id : null).filter((id) => id !== null && SAFE_ID.test(id)));
+        const declaredNewSkillIds = (Array.isArray(manifest.newSkillIds) ? manifest.newSkillIds : []).filter((id) => typeof id === "string" && SAFE_ID.test(id));
+        const targetSkillId = typeof staged.targetSkill === "string" && SAFE_ID.test(staged.targetSkill) ? staged.targetSkill : null;
+        if (!targetSkillId) blockers.push("Candidate target Skill must be a safe identifier.");
+        else if (!declaredTargetIds.has(targetSkillId) && !declaredNewSkillIds.includes(targetSkillId)) blockers.push("Candidate target Skill is not declared by the audited run manifest.");
+        else if (!declaredTargetIds.has(targetSkillId) && !(state.createdSkills || []).some((created) => created?.id === targetSkillId)) blockers.push("Candidate target Skill was not created by an accepted run proposal.");
         if (staged.schema !== "wikiskill.candidate.v1" || staged.candidateId !== candidate || staged.status !== "validation_accepted") blockers.push("Staged candidate manifest is invalid.");
-        if (!targetSkill || staged.targetSkill !== targetSkill.id) blockers.push("Candidate target Skill differs from the audited run.");
         if (staged.runId !== manifest.runId || staged.runId !== path.basename(runRoot)) blockers.push("Candidate run identity differs from the audited run.");
         if (!same(staged.configDigest ?? null, manifest.configDigest ?? null)) blockers.push("Candidate config digest differs from the run manifest.");
         if (!same(staged.frozenComponents ?? null, manifest.frozenComponents ?? null)) blockers.push("Candidate frozen components differ from the run manifest.");
@@ -180,14 +253,16 @@ const auditRun = (runRoot, { workspace, candidate } = {}) => {
         if (!isOperationalAggregate(state.baselineTestScore) || !isOperationalAggregate(state.testScore)) blockers.push("Candidate audit requires operational held-out test aggregates.");
         const testComparison = compare(state.testScore, state.baselineTestScore);
         if (state.candidateBlockedReason === "heldout_operational_regression" || (testComparison && (testComparison.regressions.length > 0 || testComparison.order < 0))) blockers.push("Candidate run has a held-out operational regression and must not be published.");
-        if (staged.baselineDigest) {
+        if (manifest.mode === "empty") {
+          if (staged.baselineDigest) blockers.push("Candidate baseline digest must be absent for an empty-mode run.");
+        } else if (staged.baselineDigest) {
           if (!SHA256.test(staged.baselineDigest)) blockers.push("Candidate baseline digest must be a sha256 digest.");
           else if (typeof staged.targetSkill === "string" && SAFE_ID.test(staged.targetSkill)) {
             const snapshotRoot = path.join(runRoot, "skills", "snapshots", staged.targetSkill);
             const workspaceOnly = new Set(manifest.workspaceOnlyFiles?.[staged.targetSkill] || []);
             if (skillTreeDigest(snapshotRoot, workspaceOnly) !== staged.baselineDigest) blockers.push("Candidate baseline digest differs from the run baseline Skill tree.");
           }
-        } else if (manifest.mode !== "empty") blockers.push("Candidate baseline digest is missing for a seeded run.");
+        } else blockers.push("Candidate baseline digest is missing for a seeded run.");
         if (!SHA256.test(staged.resultDigest || "")) blockers.push("Candidate result digest must be a sha256 digest.");
         else if (typeof staged.targetSkill === "string" && SAFE_ID.test(staged.targetSkill)) {
           if (treeDigest(path.join(candidateRoot, "skill")) !== staged.resultDigest) blockers.push("Staged candidate Skill tree does not match its result digest.");
@@ -202,6 +277,98 @@ const auditRun = (runRoot, { workspace, candidate } = {}) => {
         const semantic = {};
         for (const key of RESULT_SEMANTIC_KEYS) if (key in result) semantic[key] = result[key];
         if (sha256Hex(canonicalJson(semantic)) !== result.semanticResultDigest) blockers.push("Run result semantic digest does not match its content.");
+        const expectedResultHistory = (state.proposalHistory || []).map(({ proposalPath: _ignored, ...entry }) => entry);
+        if (!same(result.proposalHistory || [], expectedResultHistory)) blockers.push("Run result proposal history differs from the terminal run state.");
+        if ((result.earlyStopped === true) !== (state.earlyStopped === true) || (result.earlyStopReason ?? null) !== (state.earlyStopReason ?? null)) blockers.push("Run result early-stop fields differ from the terminal run state.");
+        const bundle = readJson(path.join(runRoot, "result", "apply-manifest.json"));
+        if (bundle.schema !== "wikiskill.apply-manifest.v1" || bundle.runId !== manifest.runId) blockers.push("Run apply manifest identity is invalid.");
+        if (typeof result.applyManifestDigest !== "string" || !HEX64.test(result.applyManifestDigest) || sha256Hex(canonicalJson(bundle)) !== result.applyManifestDigest) blockers.push("Run apply manifest digest does not match its content.");
+        if (!same(bundle.proposalHistory || [], state.proposalHistory || [])) blockers.push("Run apply manifest proposal history differs from the terminal run state.");
+        if (!same(bundle.acceptedIterations || [], state.acceptedIterations || [])) blockers.push("Run apply manifest accepted iterations differ from the terminal run state.");
+        if (!same(bundle.baselineValidationScore, state.baselineValidationScore) || !same(bundle.finalValidationScore, state.bestValidationScore) || !same(bundle.testScore, state.testScore)) blockers.push("Run apply manifest scores differ from the terminal run state.");
+        if (!same(bundle.configDigest ?? null, manifest.configDigest ?? null)) blockers.push("Run apply manifest config digest differs from the run manifest.");
+        for (const key of ["engine", "dataset", "adapterDigest", "runnerDigest", "modelDigest"]) {
+          if (!same(result[key] ?? null, manifest[key] ?? null)) blockers.push(`Run result ${key} differs from the run manifest.`);
+          if (!same(bundle[key] ?? null, manifest[key] ?? null)) blockers.push(`Run apply manifest ${key} differs from the run manifest.`);
+        }
+        if (result.changesPatchDigest !== bundle.changesPatchDigest || result.reversePatchDigest !== bundle.reversePatchDigest) blockers.push("Run result patch digests differ from the apply manifest.");
+        try {
+          const currentAttempt = state.attempt ?? 1;
+          const baselineSkillSetDigest = skillSetDigest(materializedInventory([path.join(runRoot, "skills", "snapshots"), path.join(runRoot, "skills", "context")]));
+          const finalSkillSetDigest = skillSetDigest(materializedInventory([path.join(runRoot, "result", "skills"), path.join(runRoot, "skills", "context")]));
+          if (manifest.activeSkillSetDigest !== baselineSkillSetDigest) blockers.push("Run manifest active Skill set differs from the run baseline Skill trees.");
+          for (const trace of traces) {
+            if (typeof trace.attempt === "number" && trace.attempt !== currentAttempt) continue;
+            if (trace.phase === "baseline_test" && trace.skillSetDigest !== baselineSkillSetDigest) blockers.push(`${trace.id}: baseline test trajectory Skill set differs from the run baseline Skill trees.`);
+            if (trace.phase === "final_test" && trace.skillSetDigest !== finalSkillSetDigest) blockers.push(`${trace.id}: final test trajectory Skill set differs from the run result Skill trees.`);
+          }
+        } catch (error) {
+          blockers.push(`Run Skill trees cannot be verified against trajectory Skill sets: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        if (!Array.isArray(bundle.entries)) blockers.push("Run apply manifest entries must be an array.");
+        const bundleEntries = Array.isArray(bundle.entries) ? bundle.entries : [];
+        bundleEntries.forEach((entry, index) => {
+          if (!isApplyEntry(entry)) blockers.push(`Run apply manifest entry ${index} does not declare a valid Skill change.`);
+        });
+        const entrySkillIds = bundleEntries.filter(isApplyEntry).map((entry) => entry.skillId);
+        if (new Set(entrySkillIds).size !== entrySkillIds.length) blockers.push("Run apply manifest declares duplicate Skill entries.");
+        const declaredEntries = [];
+        const declaredById = new Map();
+        for (const skill of manifest.targetSkills || []) {
+          if (skill?.projected === true && (state.acceptedIterations || []).length === 0) continue;
+          const projected = skill?.projected === true;
+          const baselineFiles = projected ? {} : isDigestMap(skill?.files) && safeFileKeys(skill.files) ? skill.files : null;
+          if (!projected && baselineFiles === null) blockers.push(`Run manifest target Skill ${String(skill?.id)} does not declare valid baseline file digests.`);
+          const declared = { skillId: skill?.id, operation: projected ? "create" : "update", sourcePath: typeof skill?.path === "string" ? skill.path : null, baselineFiles: baselineFiles ?? {} };
+          declaredEntries.push(declared);
+          declaredById.set(declared.skillId, declared);
+        }
+        for (const created of state.createdSkills || []) {
+          if (!created || typeof created.id !== "string" || !SAFE_ID.test(created.id)) {
+            blockers.push("Run state declares an invalid created Skill.");
+            continue;
+          }
+          if (typeof manifest.newSkillRoot !== "string" || !manifest.newSkillRoot) {
+            blockers.push(`Created Skill ${created.id} has no newSkillRoot declaration.`);
+            continue;
+          }
+          const declared = { skillId: created.id, operation: "create", sourcePath: path.posix.join(manifest.newSkillRoot, created.id), baselineFiles: {} };
+          declaredEntries.push(declared);
+          declaredById.set(declared.skillId, declared);
+        }
+        if (!same(entrySkillIds.slice().sort(), declaredEntries.map((entry) => entry.skillId).sort())) blockers.push("Run apply manifest entries do not match the declared target and created Skills.");
+        for (const entry of bundleEntries) {
+          if (!isApplyEntry(entry)) continue;
+          const declared = declaredById.get(entry.skillId);
+          if (!declared) continue;
+          if (entry.operation !== declared.operation) blockers.push(`Run apply manifest entry ${entry.skillId} operation does not match its declared Skill role.`);
+          if (entry.sourcePath !== declared.sourcePath) blockers.push(`Run apply manifest entry ${entry.skillId} source path does not match its declared Skill path.`);
+          if (!sameDigestMap(entry.baselineFiles, declared.baselineFiles)) blockers.push(`Run apply manifest entry ${entry.skillId} baseline files differ from the declared Skill files.`);
+          const workspaceOnly = new Set(manifest.workspaceOnlyFiles?.[entry.skillId] || []);
+          const finalRoot = path.join(runRoot, "result", "skills", entry.skillId);
+          const resultMap = fs.existsSync(finalRoot) ? fileDigestMap(finalRoot, workspaceOnly) : null;
+          if (!resultMap || !sameDigestMap(entry.finalFiles, resultMap)) blockers.push(`Run apply manifest entry ${entry.skillId} final files differ from the run result Skill tree.`);
+          if (declared.operation === "update") {
+            const snapshotRoot = path.join(runRoot, "skills", "snapshots", entry.skillId);
+            const snapshotMap = fs.existsSync(snapshotRoot) ? fileDigestMap(snapshotRoot, workspaceOnly) : null;
+            if (!snapshotMap || !sameDigestMap(entry.baselineFiles, snapshotMap)) blockers.push(`Run apply manifest entry ${entry.skillId} baseline files differ from the run baseline Skill tree.`);
+          }
+          const changedFiles = Object.keys(entry.finalFiles).filter((file) => entry.finalFiles[file] !== entry.baselineFiles[file]);
+          const deletedFiles = Object.keys(entry.baselineFiles).filter((file) => !(file in entry.finalFiles));
+          if (!same(entry.files || [], changedFiles) || !same(entry.deletedFiles || [], deletedFiles)) blockers.push(`Run apply manifest entry ${entry.skillId} change lists differ from its file digests.`);
+        }
+        const targetEntries = bundleEntries.filter((entry) => entry?.skillId === staged.targetSkill);
+        if (targetEntries.length !== 1) blockers.push("Run apply manifest must declare exactly one entry for the candidate target Skill.");
+        else if (isApplyEntry(targetEntries[0]) && typeof staged.targetSkill === "string" && SAFE_ID.test(staged.targetSkill)) {
+          const workspaceOnly = new Set(manifest.workspaceOnlyFiles?.[staged.targetSkill] || []);
+          const stagedMap = fileDigestMap(path.join(candidateRoot, "skill"), workspaceOnly);
+          if (!sameDigestMap(targetEntries[0].finalFiles, stagedMap)) blockers.push("Staged candidate Skill files differ from the run apply manifest entry.");
+        }
+        const changesPatch = fs.readFileSync(path.join(runRoot, "result", "changes.patch"), "utf8");
+        const reversePatch = fs.readFileSync(path.join(runRoot, "result", "reverse.patch"), "utf8");
+        if (sha256Hex(changesPatch) !== bundle.changesPatchDigest || sha256Hex(reversePatch) !== bundle.reversePatchDigest) blockers.push("Run result patch files differ from the apply manifest patch digests.");
+        if (Array.isArray(bundle.entries) && bundleEntries.every(isApplyEntry)
+          && (sha256Hex(rebuildPatch(runRoot, bundleEntries, false)) !== bundle.changesPatchDigest || sha256Hex(rebuildPatch(runRoot, bundleEntries, true)) !== bundle.reversePatchDigest)) blockers.push("Run result patches do not match the run Skill trees.");
         candidateSummary = {
           candidateId: staged.candidateId,
           runId: staged.runId,

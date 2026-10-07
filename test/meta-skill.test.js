@@ -254,6 +254,7 @@ test("terminal run audit verifies the Raw receipt, strict gating, final-only tes
     bestValidationScore: 1,
     baselineTestScore: 0,
     testScore: 1,
+    acceptedIterations: [1],
     runtimeSessions: [
       { kind: "inference", provider: provider("session-1") },
       { kind: "inference", provider: provider("session-2") },

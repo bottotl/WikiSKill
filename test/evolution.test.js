@@ -2,6 +2,7 @@
 
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const execFileSync = require("node:child_process").execFileSync;
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -9,8 +10,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { execute } = require("../src/cli");
-const { configureEvolution, evolveWorkspace, statusWorkspaceEvolution } = require("../src/evolution");
-const { validateDataset } = require("../src/index");
+const { configureEvolution, evolveWorkspace, statusWorkspaceEvolution, treeDigest } = require("../src/evolution");
+const { createRun, runEvolution, validateDataset } = require("../src/index");
 const { createCapabilityRegistry } = require("../src/runtime-capabilities");
 const { createCommandExitScorer } = require("../src/command-scorer");
 const { createOperationalMilestoneScorer } = require("../src/operational-scorer");
@@ -446,6 +447,449 @@ test("run audit rejects a fabricated candidate for a held-out operational regres
   const audited = auditRun(result.runRoot, { workspace, candidate: candidateId });
   assert.deepEqual(audited.blockers, ["Candidate run has a held-out operational regression and must not be published."]);
   assert.equal(audited.data.candidate.candidateId, candidateId);
+});
+
+const operationalAdapterFor = () => ({
+  ...adapter,
+  score: ({ prediction }) => {
+    const verifiedMilestones = prediction.improved ? ["M0", "M1", "M2"] : ["M0", "M1"];
+    return {
+      score: {
+        schema: "wikiskill.operational-outcome.v1",
+        eligible: true,
+        terminalSuccess: prediction.improved,
+        verifiedMilestones,
+        highestVerifiedMilestone: verifiedMilestones.length - 1,
+        verifiedMilestoneCount: verifiedMilestones.length,
+        actionableBlockersRemoved: prediction.improved ? 1 : 0,
+        unauthorizedWrites: 0,
+        unrecoveredUserChanges: 0,
+        diagnosisVerifierPassed: true
+      },
+      evidence: { source: "test-harness" }
+    };
+  }
+});
+
+test("run audit accepts an empty-mode operational candidate by its uniquely declared new Skill", async () => {
+  const { workspace, stateRoot, datasetPath } = await setupEmpty();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const emptyRunner = async ({ task, skills }) => ({
+    prediction: { improved: Boolean(skills.target["target-skill"]?.["SKILL.md"]?.includes("improved procedure")) },
+    events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+  });
+  const createProposer = async ({ availableTraces, readTrace, allowedNewSkillIds }) => {
+    const traceReads = availableTraces.slice(0, 4).map(({ id }) => id);
+    traceReads.forEach(readTrace);
+    return {
+      action: "create",
+      skillId: allowedNewSkillIds[0],
+      traceReads,
+      files: {
+        "SKILL.md": "---\nname: target-skill\ndescription: Handle target tasks.\n---\n\nUse the improved procedure.\n",
+        "PURPOSE.md": "# Purpose\n\n- Supporting pattern: procedure.md\n"
+      }
+    };
+  };
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    empty: true,
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "empty-operational-candidate-audit",
+    adapter: operationalAdapterFor(),
+    runner: emptyRunner,
+    maintainer,
+    proposer: createProposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+  assert.equal(result.candidate.baselineDigest, null);
+  const candidateId = result.candidate.candidateId;
+  const audited = auditRun(result.runRoot, { workspace, candidate: candidateId });
+  assert.deepEqual(audited.blockers, []);
+  assert.equal(audited.data.candidate.targetSkill, "target-skill");
+  assert.equal(audited.data.candidate.baselineDigest, null);
+  assert.deepEqual(audited.data.candidate.acceptedIterations, [1]);
+  assert.equal(audited.data.candidate.testScore.verifiedMilestoneCount, 3);
+  assert.match(audited.warnings.join("\n"), /not an independent or unforgeable evaluation proof/u);
+
+  const candidateRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+  await makeWritable(candidateRoot);
+  const candidateManifestPath = path.join(candidateRoot, "candidate.json");
+  const staged = JSON.parse(await fs.readFile(candidateManifestPath, "utf8"));
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify({ ...staged, targetSkill: "undeclared-skill" }, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Candidate target Skill is not declared by the audited run manifest/u);
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify({ ...staged, baselineDigest: staged.resultDigest }, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Candidate baseline digest must be absent for an empty-mode run/u);
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify(staged, null, 2)}\n`);
+  assert.deepEqual(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers, []);
+});
+
+test("run audit rejects a dual-tree candidate forgery with a recomputed identity", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const operationalRunner = async ({ task, skills }) => ({
+    prediction: { improved: skills.target["target-skill"]["SKILL.md"].includes("improved procedure") },
+    events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+  });
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-dual-tree-forgery",
+    adapter: operationalAdapterFor(),
+    runner: operationalRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+  const candidateId = result.candidate.candidateId;
+  assert.deepEqual(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers, []);
+
+  const candidateRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+  const staged = JSON.parse(await fs.readFile(path.join(candidateRoot, "candidate.json"), "utf8"));
+  const resultTree = path.join(result.runRoot, "result", "skills", "target-skill");
+  await fs.writeFile(path.join(resultTree, "SKILL.md"), "---\nname: target-skill\ndescription: Forged.\n---\n\nForged procedure.\n");
+  const forgedDigest = treeDigest(resultTree);
+  const forgedId = `candidate-${crypto.createHash("sha256").update(`target-skill\0${staged.baselineDigest}\0${forgedDigest}`).digest("hex").slice(0, 24)}`;
+  const forgedRoot = path.join(workspace, ".wikiskill", "candidates", forgedId);
+  await fs.mkdir(forgedRoot, { recursive: true });
+  fsSync.cpSync(resultTree, path.join(forgedRoot, "skill"), { recursive: true });
+  await fs.writeFile(path.join(forgedRoot, "candidate.json"), `${JSON.stringify({ ...staged, candidateId: forgedId, resultDigest: forgedDigest }, null, 2)}\n`);
+  const blockers = auditRun(result.runRoot, { workspace, candidate: forgedId }).blockers.join("\n");
+  assert.equal(blockers.includes("Candidate identity digest is invalid."), false);
+  assert.match(blockers, /Run apply manifest entry target-skill final files differ from the run result Skill tree/u);
+  assert.match(blockers, /final test trajectory Skill set differs from the run result Skill trees/u);
+  assert.match(blockers, /Staged candidate Skill files differ from the run apply manifest entry/u);
+  assert.match(blockers, /Run result patches do not match the run Skill trees/u);
+});
+
+const ATTACK_SEMANTIC_KEYS = ["engine", "configDigest", "dataset", "adapterDigest", "runnerDigest", "modelDigest", "proposalHistory", "baselineValidationScore", "finalValidationScore", "testScore", "acceptedIterations", "earlyStopped", "earlyStopReason", "changesPatchDigest", "reversePatchDigest"];
+const attackHex = (value) => crypto.createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+const attackCanonical = (value) => `${JSON.stringify(value, null, 2)}\n`;
+const attackPatch = (runRoot, entries, reverse) => {
+  const blocks = [];
+  for (const entry of entries) {
+    const baselineRoot = path.join(runRoot, "skills", "snapshots", entry.skillId);
+    const finalRoot = path.join(runRoot, "result", "skills", entry.skillId);
+    const files = new Set([...Object.keys(entry.baselineFiles), ...Object.keys(entry.finalFiles)]);
+    for (const file of [...files].sort()) {
+      const before = entry.operation === "create" ? "" : fsSync.existsSync(path.join(baselineRoot, file)) ? fsSync.readFileSync(path.join(baselineRoot, file), "utf8") : "";
+      const after = fsSync.existsSync(path.join(finalRoot, file)) ? fsSync.readFileSync(path.join(finalRoot, file), "utf8") : "";
+      if (before === after) continue;
+      const target = `${entry.sourcePath}/${file}`;
+      const from = reverse ? after : before;
+      const to = reverse ? before : after;
+      const removed = from.split("\n").map((line) => line ? `-${line}` : "-").join("\n");
+      const added = to.split("\n").map((line) => line ? `+${line}` : "+").join("\n");
+      blocks.push(`diff --git a/${target} b/${target}\n--- a/${target}\n+++ b/${target}\n@@\n${removed}\n${added}\n`);
+    }
+  }
+  return blocks.join("");
+};
+
+test("run audit stays fail-closed when a forged bundle recomputes every internal digest", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const operationalRunner = async ({ task, skills }) => ({
+    prediction: { improved: skills.target["target-skill"]["SKILL.md"].includes("improved procedure") },
+    events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+  });
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-fail-closed-entries",
+    adapter: operationalAdapterFor(),
+    runner: operationalRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+  const runRoot = result.runRoot;
+  const originalCandidateId = result.candidate.candidateId;
+  assert.deepEqual(auditRun(runRoot, { workspace, candidate: originalCandidateId }).blockers, []);
+
+  // Attacker forges both Skill trees, every bundle digest, both patches, and the candidate identity.
+  const staged = JSON.parse(await fs.readFile(path.join(workspace, ".wikiskill", "candidates", originalCandidateId, "candidate.json"), "utf8"));
+  const forgedSkill = "---\nname: target-skill\ndescription: Forged.\n---\n\nForged procedure.\n";
+  const forgedTree = path.join(runRoot, "result", "skills", "target-skill");
+  await fs.writeFile(path.join(forgedTree, "SKILL.md"), forgedSkill);
+  const forgedResultDigest = treeDigest(forgedTree);
+  const forgedCandidateId = `candidate-${crypto.createHash("sha256").update(`target-skill\0${staged.baselineDigest}\0${forgedResultDigest}`).digest("hex").slice(0, 24)}`;
+  const forgedCandidateRoot = path.join(workspace, ".wikiskill", "candidates", forgedCandidateId);
+  await fs.mkdir(forgedCandidateRoot, { recursive: true });
+  fsSync.cpSync(forgedTree, path.join(forgedCandidateRoot, "skill"), { recursive: true });
+  await fs.writeFile(path.join(forgedCandidateRoot, "candidate.json"), attackCanonical({ ...staged, candidateId: forgedCandidateId, resultDigest: forgedResultDigest }));
+
+  const originalBundle = JSON.parse(await fs.readFile(path.join(runRoot, "result", "apply-manifest.json"), "utf8"));
+  const originalResult = JSON.parse(await fs.readFile(path.join(runRoot, "result", "result.json"), "utf8"));
+  const forgedEntry = { ...originalBundle.entries[0], finalFiles: { "SKILL.md": attackHex(forgedSkill) }, files: ["SKILL.md"] };
+  const rewriteArtifacts = async (bundle) => {
+    const entries = Array.isArray(bundle.entries) ? bundle.entries : [];
+    const changesPatch = attackPatch(runRoot, entries.filter((entry) => entry && typeof entry === "object" && typeof entry.skillId === "string"), false);
+    const reversePatch = attackPatch(runRoot, entries.filter((entry) => entry && typeof entry === "object" && typeof entry.skillId === "string"), true);
+    await fs.writeFile(path.join(runRoot, "result", "changes.patch"), changesPatch);
+    await fs.writeFile(path.join(runRoot, "result", "reverse.patch"), reversePatch);
+    const sealedBundle = { ...bundle, changesPatchDigest: attackHex(changesPatch), reversePatchDigest: attackHex(reversePatch) };
+    await fs.writeFile(path.join(runRoot, "result", "apply-manifest.json"), attackCanonical(sealedBundle));
+    const semantic = {};
+    const sealedResult = { ...originalResult, changesPatchDigest: sealedBundle.changesPatchDigest, reversePatchDigest: sealedBundle.reversePatchDigest, applyManifestDigest: attackHex(attackCanonical(sealedBundle)) };
+    for (const key of ATTACK_SEMANTIC_KEYS) if (key in sealedResult) semantic[key] = sealedResult[key];
+    sealedResult.semanticResultDigest = attackHex(attackCanonical(semantic));
+    await fs.writeFile(path.join(runRoot, "result", "result.json"), attackCanonical(sealedResult));
+    return sealedBundle;
+  };
+
+  // A fully consistent forgery without any extra entry is still pinned to the Raw authority by the trajectory Skill sets.
+  await rewriteArtifacts({ ...originalBundle, entries: [forgedEntry] });
+  const consistentBlockers = auditRun(runRoot, { workspace, candidate: forgedCandidateId }).blockers;
+  assert.equal(consistentBlockers.length, 1);
+  assert.match(consistentBlockers.join("\n"), /final test trajectory Skill set differs from the run result Skill trees/u);
+
+  // The published proposal history must mirror the terminal state minus proposalPath, even under a recomputed semantic digest.
+  const historyTampered = JSON.parse(await fs.readFile(path.join(runRoot, "result", "result.json"), "utf8"));
+  historyTampered.proposalHistory = (historyTampered.proposalHistory || []).map((entry) => ({ proposalPath: "runs/proposals/iter-01-attempt-01.json", ...entry }));
+  const tamperedSemantic = {};
+  for (const key of ATTACK_SEMANTIC_KEYS) if (key in historyTampered) tamperedSemantic[key] = historyTampered[key];
+  historyTampered.semanticResultDigest = attackHex(attackCanonical(tamperedSemantic));
+  await fs.writeFile(path.join(runRoot, "result", "result.json"), attackCanonical(historyTampered));
+  assert.match(auditRun(runRoot, { workspace, candidate: forgedCandidateId }).blockers.join("\n"), /Run result proposal history differs from the terminal run state/u);
+
+  const invalidEntryVariants = [
+    ["a non-object entry", "not-an-entry", /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["an unsafe Skill id", { skillId: "../escape", operation: "update", sourcePath: "skills/ghost", baselineFiles: {}, finalFiles: {}, files: [], deletedFiles: [] }, /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["an unknown operation", { skillId: "ghost-skill", operation: "delete", sourcePath: "skills/ghost", baselineFiles: {}, finalFiles: {}, files: [], deletedFiles: [] }, /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["a non-digest file map", { skillId: "ghost-skill", operation: "update", sourcePath: "skills/ghost", baselineFiles: {}, finalFiles: { "SKILL.md": "not-a-digest" }, files: [], deletedFiles: [] }, /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["an escaping file key", { skillId: "ghost-skill", operation: "update", sourcePath: "skills/ghost", baselineFiles: {}, finalFiles: { "../evil.md": "a".repeat(64) }, files: [], deletedFiles: [] }, /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["an absolute source path", { skillId: "ghost-skill", operation: "update", sourcePath: "/etc/cron.d", baselineFiles: {}, finalFiles: {}, files: [], deletedFiles: [] }, /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["a non-array change list", { skillId: "ghost-skill", operation: "update", sourcePath: "skills/ghost", baselineFiles: {}, finalFiles: {}, files: "SKILL.md", deletedFiles: [] }, /Run apply manifest entry 1 does not declare a valid Skill change/u],
+    ["a valid but undeclared entry", { skillId: "ghost-skill", operation: "create", sourcePath: ".wikiskill/skills/ghost-skill", baselineFiles: {}, finalFiles: {}, files: [], deletedFiles: [] }, /Run apply manifest entries do not match the declared target and created Skills/u]
+  ];
+  for (const [label, extraEntry, expected] of invalidEntryVariants) {
+    const sealed = await rewriteArtifacts({ ...originalBundle, entries: [forgedEntry, extraEntry] });
+    assert.equal(Array.isArray(sealed.entries), true);
+    const blockers = auditRun(runRoot, { workspace, candidate: forgedCandidateId }).blockers;
+    assert.equal(blockers.length === 0, false, `invalid extra entry (${label}) must not reach zero blockers`);
+    assert.match(blockers.join("\n"), expected);
+    assert.match(blockers.join("\n"), /final test trajectory Skill set differs from the run result Skill trees/u);
+  }
+
+  const nonArray = await rewriteArtifacts({ ...originalBundle, entries: { 0: forgedEntry } });
+  assert.equal(Array.isArray(nonArray.entries), false);
+  const nonArrayBlockers = auditRun(runRoot, { workspace, candidate: forgedCandidateId }).blockers;
+  assert.equal(nonArrayBlockers.length === 0, false);
+  assert.match(nonArrayBlockers.join("\n"), /Run apply manifest entries must be an array/u);
+  assert.match(nonArrayBlockers.join("\n"), /Run apply manifest entries do not match the declared target and created Skills/u);
+});
+
+test("run audit accepts a genuine multi-Skill bundle with projection and creation", async () => {
+  const repo = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-multi-repo-"));
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+  await fs.mkdir(path.join(repo, ".agents", "skills", "one"), { recursive: true });
+  await fs.writeFile(path.join(repo, ".agents", "skills", "one", "SKILL.md"), "# One\nUse the old procedure.\n");
+  execFileSync("git", ["add", "."], { cwd: repo });
+  execFileSync("git", ["-c", "user.name=WikiSkill", "-c", "user.email=wikiskill@example.invalid", "commit", "-qm", "fixture"], { cwd: repo });
+  const stateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-multi-state-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-multi-workspace-"));
+  const runId = "multi-skill-projection";
+  const manifest = await createRun({
+    repo,
+    skillRoots: [".agents/skills"],
+    targetSkills: ["one"],
+    projectedSkills: [{ id: "proj-skill", destination: ".agents/skills/proj-skill", mode: "target", files: {
+      "SKILL.md": "---\nname: proj-skill\ndescription: Projected helper.\n---\n\nProjected procedure.\n",
+      "PURPOSE.md": "# Purpose\n\n- Projected at run creation.\n"
+    } }],
+    newSkillRoot: ".agents/skills",
+    newSkillIds: ["born-skill"],
+    dataset: { schema: "wikiskill.dataset.v1", tasks: tasks().map((task) => ({ ...task, evaluator: { capabilityRef: "adapter:test" } })) },
+    stateRoot,
+    runId,
+    iterationLimit: 2,
+    rawReferencePrefix: `.wikiskill/raw/evolutions/${runId}`
+  });
+  const milestoneAdapter = {
+    ...adapter,
+    score: ({ prediction }) => {
+      const verifiedMilestones = prediction.verifiedMilestones;
+      return {
+        score: {
+          schema: "wikiskill.operational-outcome.v1",
+          eligible: true,
+          terminalSuccess: verifiedMilestones.length === 3,
+          verifiedMilestones,
+          highestVerifiedMilestone: verifiedMilestones.length - 1,
+          verifiedMilestoneCount: verifiedMilestones.length,
+          actionableBlockersRemoved: 0,
+          unauthorizedWrites: 0,
+          unrecoveredUserChanges: 0,
+          diagnosisVerifierPassed: true
+        },
+        evidence: { source: "test-harness" }
+      };
+    }
+  };
+  const multiRunner = async ({ task, skills }) => {
+    const patched = Boolean(skills.target.one?.["SKILL.md"]?.includes("improved procedure"));
+    const born = Boolean(skills.target["born-skill"]);
+    const verifiedMilestones = born ? ["M0", "M1", "M2"] : patched ? ["M0", "M1"] : ["M0"];
+    return {
+      prediction: { verifiedMilestones, terminalSuccess: verifiedMilestones.length === 3 },
+      events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+    };
+  };
+  const multiProposer = async ({ iteration, availableTraces, readTrace }) => {
+    const traceReads = availableTraces.slice(0, 4).map(({ id }) => id);
+    traceReads.forEach(readTrace);
+    if (iteration === 1) return { action: "patch", skillId: "one", traceReads, files: { "SKILL.md": "# One\nUse the improved procedure.\n" } };
+    return { action: "create", skillId: "born-skill", traceReads, files: {
+      "SKILL.md": "---\nname: born-skill\ndescription: Born helper.\n---\n\nBorn procedure.\n",
+      "PURPOSE.md": "# Purpose\n\n- Created by an accepted proposal.\n"
+    } };
+  };
+  await runEvolution(manifest.runRoot, { adapter: milestoneAdapter, runner: multiRunner, maintainer, proposer: multiProposer });
+
+  const runRoot = manifest.runRoot;
+  const state = JSON.parse(await fs.readFile(path.join(runRoot, "runs", "state.json"), "utf8"));
+  assert.deepEqual(state.acceptedIterations, [1, 2]);
+  assert.deepEqual((state.createdSkills || []).map((created) => created.id), ["born-skill"]);
+  const bundle = JSON.parse(await fs.readFile(path.join(runRoot, "result", "apply-manifest.json"), "utf8"));
+  assert.deepEqual(bundle.entries.map((entry) => [entry.skillId, entry.operation, entry.sourcePath]), [
+    ["one", "update", ".agents/skills/one"],
+    ["proj-skill", "create", ".agents/skills/proj-skill"],
+    ["born-skill", "create", ".agents/skills/born-skill"]
+  ]);
+
+  const authorityRoot = path.join(workspace, ".wikiskill", "raw", "evolutions", runId);
+  await fs.mkdir(authorityRoot, { recursive: true });
+  fsSync.cpSync(path.join(runRoot, "raw"), path.join(authorityRoot, "raw"), { recursive: true });
+  const rawDigest = treeDigest(path.join(authorityRoot, "raw"));
+  await fs.writeFile(path.join(authorityRoot, "manifest.json"), attackCanonical({ schema: "wikiskill.evolution-raw.v1", runId, rawDigest }));
+  await fs.writeFile(path.join(runRoot, "result", "raw-authority.json"), attackCanonical({ schema: "wikiskill.raw-authority-receipt.v1", runId, rawRef: `.wikiskill/raw/evolutions/${runId}`, rawDigest }));
+
+  const targetTree = path.join(runRoot, "result", "skills", "one");
+  const resultDigest = treeDigest(targetTree);
+  const baselineDigest = treeDigest(path.join(repo, ".agents", "skills", "one"));
+  const candidateId = `candidate-${crypto.createHash("sha256").update(`one\0${baselineDigest}\0${resultDigest}`).digest("hex").slice(0, 24)}`;
+  const candidateRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+  await fs.mkdir(candidateRoot, { recursive: true });
+  fsSync.cpSync(targetTree, path.join(candidateRoot, "skill"), { recursive: true });
+  await fs.writeFile(path.join(candidateRoot, "candidate.json"), attackCanonical({
+    schema: "wikiskill.candidate.v1",
+    candidateId,
+    targetSkill: "one",
+    status: "validation_accepted",
+    baselineDigest,
+    resultDigest,
+    runId,
+    baselineValidationScore: state.baselineValidationScore,
+    candidateValidationScore: state.bestValidationScore,
+    testScore: state.testScore,
+    acceptedIterations: state.acceptedIterations,
+    configDigest: manifest.configDigest,
+    frozenComponents: manifest.frozenComponents
+  }));
+  const audited = auditRun(runRoot, { workspace, candidate: candidateId });
+  assert.deepEqual(audited.blockers, []);
+  assert.equal(audited.data.candidate.targetSkill, "one");
+  assert.deepEqual(audited.data.candidate.acceptedIterations, [1, 2]);
+});
+
+test("run audit derives accepted iterations from the raw-verified proposal history", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const milestoneRunner = async ({ task, skills }) => ({
+    prediction: { improved: skills.target["target-skill"]["SKILL.md"].includes("improved procedure") },
+    events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+  });
+  const milestoneAdapter = {
+    ...adapter,
+    score: ({ prediction }) => {
+      const verifiedMilestones = prediction.improved ? ["M0", "M1"] : ["M0"];
+      return {
+        score: {
+          schema: "wikiskill.operational-outcome.v1",
+          eligible: true,
+          terminalSuccess: false,
+          verifiedMilestones,
+          highestVerifiedMilestone: verifiedMilestones.length - 1,
+          verifiedMilestoneCount: verifiedMilestones.length,
+          actionableBlockersRemoved: prediction.improved ? 1 : 0,
+          unauthorizedWrites: 0,
+          unrecoveredUserChanges: 0,
+          diagnosisVerifierPassed: true
+        },
+        evidence: { source: "test-harness" }
+      };
+    }
+  };
+  const twoIterationProposer = async ({ iteration, availableTraces, readTrace }) => {
+    const traceReads = availableTraces.slice(0, 4).map(({ id }) => id);
+    traceReads.forEach(readTrace);
+    const body = iteration === 1
+      ? "---\nname: target-skill\ndescription: Handle target tasks.\n---\n\nUse the improved procedure.\n"
+      : "---\nname: target-skill\ndescription: Handle target tasks.\n---\n\nUse the improved procedure.\n\nCosmetic note.\n";
+    return { action: "patch", skillId: "target-skill", traceReads, files: { "SKILL.md": body } };
+  };
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-history-derivation",
+    adapter: milestoneAdapter,
+    runner: milestoneRunner,
+    maintainer,
+    proposer: twoIterationProposer,
+    model: { id: "test-model" },
+    iterationLimit: 2
+  });
+  assert.deepEqual(result.state.acceptedIterations, [1]);
+  assert.equal(result.state.proposalHistory.length, 2);
+  assert.equal(result.state.proposalHistory[1].accepted, false);
+  const candidateId = result.candidate.candidateId;
+  assert.deepEqual(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers, []);
+
+  const hex = (value) => crypto.createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+  const canonical = (value) => `${JSON.stringify(value, null, 2)}\n`;
+  const semanticKeys = ["engine", "configDigest", "dataset", "adapterDigest", "runnerDigest", "modelDigest", "proposalHistory", "baselineValidationScore", "finalValidationScore", "testScore", "acceptedIterations", "earlyStopped", "earlyStopReason", "changesPatchDigest", "reversePatchDigest"];
+  const statePath = path.join(result.runRoot, "runs", "state.json");
+  const stateJson = JSON.parse(await fs.readFile(statePath, "utf8"));
+  await fs.writeFile(statePath, `${JSON.stringify({ ...stateJson, acceptedIterations: [1, 2] }, null, 2)}\n`);
+  const candidateRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+  await makeWritable(candidateRoot);
+  const candidateManifestPath = path.join(candidateRoot, "candidate.json");
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify({ ...JSON.parse(await fs.readFile(candidateManifestPath, "utf8")), acceptedIterations: [1, 2] }, null, 2)}\n`);
+  const resultPath = path.join(result.runRoot, "result", "result.json");
+  const bundlePath = path.join(result.runRoot, "result", "apply-manifest.json");
+  const tamperedResult = { ...JSON.parse(await fs.readFile(resultPath, "utf8")), acceptedIterations: [1, 2] };
+  const tamperedBundle = { ...JSON.parse(await fs.readFile(bundlePath, "utf8")), acceptedIterations: [1, 2] };
+  tamperedResult.applyManifestDigest = hex(canonical(tamperedBundle));
+  const semantic = {};
+  for (const key of semanticKeys) if (key in tamperedResult) semantic[key] = tamperedResult[key];
+  tamperedResult.semanticResultDigest = hex(canonical(semantic));
+  await fs.writeFile(resultPath, `${JSON.stringify(tamperedResult, null, 2)}\n`);
+  await fs.writeFile(bundlePath, `${JSON.stringify(tamperedBundle, null, 2)}\n`);
+  assert.deepEqual(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers, ["Run state accepted iterations do not match the accepted proposal history."]);
 });
 
 test("terminal operational baseline reports dataset saturation without learning", async () => {
