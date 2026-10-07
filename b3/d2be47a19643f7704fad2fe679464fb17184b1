@@ -1,0 +1,118 @@
+src/audit/run.js
+  s_7573fb0fc2a175::t_d8a004634bc244 111-112,114-120
+src/evolution.js
+  s_d11b7c27f6eb0d::t_6ce23e79ca1308 194-203
+  s_d11b7c27f6eb0d::t_50ff1421fb85ef 395
+  s_d11b7c27f6eb0d::t_8403f7db1192f5 571
+docs/architecture/host-integration.md
+  s_88a033808b5871::t_96086773b3a5d5 9
+src/index.js
+  s_7573fb0fc2a175::t_9aa6f3d2646fdf 891
+  s_7573fb0fc2a175::t_70f61c23bb4b37 848-850
+  s_d11b7c27f6eb0d::t_d04102309b76f9 1459
+test/replay-score.test.js
+  s_7573fb0fc2a175::t_c2a28c7314a120 116
+  s_7573fb0fc2a175::t_639c173a004c24 45-66,105-115,117-120,144-145,151-162,168-170,180,184,210-232,253-254,271,273-274,380-459,461-510,744-773
+  s_d11b7c27f6eb0d::t_ffb71bc8798b36 4
+  s_82ae5b5dbf1a30::t_586f1de48a9b0b 67-74
+  s_7573fb0fc2a175::t_e42228cae1452d 460
+  s_130ac01ff0ab8e::t_21b49ef19cc7f4 610-617
+  s_82ae5b5dbf1a30::t_19221ab7e24bd4 511-552,554-609,645-646,683-714,718-720,723-724,726-731,733-736,738-743
+  s_d11b7c27f6eb0d::t_c994ef4e3738d3 1-3,6-11,13-44,75-104,121-143,146-150,163-167,171-179,181-183,185-198,208-209,233-252,255-270,276-379,774-775
+  s_88a033808b5871::t_a39f00309338c3 715-717,721-722,725,732
+  s_130ac01ff0ab8e::t_8da3ee7d8e8b66 5,12
+  s_82ae5b5dbf1a30::t_fd671a509e9e17 272,275
+  s_82ae5b5dbf1a30::t_e1aae1ea8a118b 737
+  s_130ac01ff0ab8e::t_035116d03fe8f1 199-207
+  s_130ac01ff0ab8e::t_8bea57a3ea7980 618-644,647-682
+  s_82ae5b5dbf1a30::t_b5ad55de2c57e7 553
+  s_88a033808b5871::t_9039446efc7384 776-805
+src/claude-runner.js
+  s_82ae5b5dbf1a30::t_a72284ce82d9c4 113-114
+  s_82ae5b5dbf1a30::t_aaef4f4d6db52f 76-79,81-82,85,88-89,94-96
+  s_82ae5b5dbf1a30::t_0c845dbf4a6136 8
+  s_df94470a0ab571::t_deb6c66190fe6c 80
+test/claude-runner.test.js
+  s_82ae5b5dbf1a30::t_9268d7d1823f38 74
+  s_82ae5b5dbf1a30::t_7dcad08a47c26d 68-71,73,75-78,87-94,96-101
+  s_82ae5b5dbf1a30::t_dc5a892f137659 72
+  s_82ae5b5dbf1a30::t_e98b1c78407f66 79-86,95
+src/cli.js
+  s_82ae5b5dbf1a30::t_9be224c397fc8f 332
+  s_d11b7c27f6eb0d::t_e6ce3d3ec38d9e 43
+  s_82ae5b5dbf1a30::t_d45f7f89bf057b 21
+  s_d11b7c27f6eb0d::t_1e1e20961bdb68 319-326,328-331,336
+  s_82ae5b5dbf1a30::t_d75025488aaf3a 79
+  s_130ac01ff0ab8e::t_6fe904ce6abb5a 327,333-335
+src/replay-score.js
+  s_130ac01ff0ab8e::t_c8c25daa5879a8 178
+  s_88a033808b5871::t_49fc31701ac2c7 281-286
+  s_82ae5b5dbf1a30::t_eaacc3fe353b26 17,37-39,41-162,165-168,204-207,214-217,261,263,279-280,287-301,326,343-344,351-354,364,376,401-402,404-405,411,425,429,431
+  s_88a033808b5871::t_678a6682680cb3 303-321
+  s_88a033808b5871::t_2b2e13ebfce744 267
+  s_130ac01ff0ab8e::t_7183caf207398e 362
+  s_7573fb0fc2a175::t_88a4a3551a5cb4 10,15-16,21-35,187-188,192-193,202,209-213,240-246,252-256,259-260,262,264-266,269-272,274,328-332,334-338,424
+  s_130ac01ff0ab8e::t_0a0e37b667a45f 345-350
+  s_82ae5b5dbf1a30::t_1c9ae10e0b9c96 40
+  s_82ae5b5dbf1a30::t_3fc8413073261a 163-164
+  s_82ae5b5dbf1a30::t_835f10302031f5 268
+  s_d11b7c27f6eb0d::t_4c35def42b1194 237-239,248-249
+  s_d11b7c27f6eb0d::t_5aaa76216d5ea9 1-9,11-14,18-20,36,169-177,179-186,189-191,194-201,203,208,218-236,247,250-251,257-258,273,275-278,302,322-325,327,333,339-342,355-361,363,365-375,377-396,403,407-410,412-423,426-428,430,432-443
+  s_130ac01ff0ab8e::t_537283b200e024 397-400,406
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b3d2be47a19643f7704fad2fe679464fb17184b1",
+  "prompts": {},
+  "sessions": {
+    "s_130ac01ff0ab8e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "44521879-d886-4dbc-ab19-f168d75e909d",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    },
+    "s_7573fb0fc2a175": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f96452c-ce6d-4ab5-8640-18181315f6bd",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    },
+    "s_82ae5b5dbf1a30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7fe7ea89-0c32-4ae5-bf43-0ca01e0aeef9",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    },
+    "s_88a033808b5871": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "727e5346-9707-4c49-abf7-6046ee4e0220",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    },
+    "s_d11b7c27f6eb0d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "afb6c1a2-c8da-461b-8dc0-aad9b5c65756",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    },
+    "s_df94470a0ab571": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a116d9-a8c1-7ba3-a8ab-19d713084f56",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    }
+  }
+}
