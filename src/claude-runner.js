@@ -5,6 +5,7 @@ const { createCleanProviderEnvironment } = require("./clean-environment");
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 const MAX_CODING_OUTPUT_BYTES = 32 * 1024 * 1024;
+const KILL_GRACE_MS = 250;
 const outputSchema = (predictionSchema = { type: "string" }) => JSON.stringify({
   type: "object",
   additionalProperties: false,
@@ -72,18 +73,27 @@ const createClaudeRunner = (config = {}) => {
     let outputBytes = 0;
     let settled = false;
     const finish = (callback) => { if (!settled) { settled = true; clearTimeout(timeout); abortSignal?.removeEventListener("abort", abort); callback(); } };
+    let killTimer;
+    const stopChild = () => {
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        try { child.kill("SIGKILL"); } catch {}
+      }, KILL_GRACE_MS);
+    };
     const append = (chunk, stream) => {
       outputBytes += chunk.length;
-      if (outputBytes > maxOutputBytes) { child.kill("SIGTERM"); finish(() => reject(runnerError(`Claude runner output exceeded ${development ? "32" : "2"} MiB.`, { stdout, stderr, outputExceeded: true, timedOut: false }))); return; }
+      if (outputBytes > maxOutputBytes) { stopChild(); finish(() => reject(runnerError(`Claude runner output exceeded ${development ? "32" : "2"} MiB.`, { stdout, stderr, outputExceeded: true, timedOut: false }))); return; }
       if (stream === "stdout") stdout += chunk.toString("utf8"); else stderr += chunk.toString("utf8");
     };
-    const abort = () => child.kill("SIGTERM");
-    const timeout = setTimeout(() => { child.kill("SIGTERM"); finish(() => reject(runnerError(`Claude runner timed out after ${taskTimeoutMs}ms.`, { stdout, stderr, outputExceeded: false, timedOut: true }))); }, taskTimeoutMs);
+    const abort = () => stopChild();
+    const timeout = setTimeout(() => { stopChild(); finish(() => reject(runnerError(`Claude runner timed out after ${taskTimeoutMs}ms.`, { stdout, stderr, outputExceeded: false, timedOut: true }))); }, taskTimeoutMs);
     abortSignal?.addEventListener("abort", abort, { once: true });
     child.stdout.on("data", (chunk) => append(chunk, "stdout"));
     child.stderr.on("data", (chunk) => append(chunk, "stderr"));
     child.once("error", (error) => finish(() => reject(error)));
-    child.once("close", (code) => finish(() => {
+    child.once("close", (code) => {
+      if (killTimer) clearTimeout(killTimer);
+      finish(() => {
       if (abortSignal?.aborted) return reject(runnerError("Claude runner aborted.", { stdout, stderr, exitCode: code, aborted: true }));
       if (code !== 0) return reject(runnerError(`Claude runner exited with code ${code ?? "null"}: ${stderr.trim()}`, { stdout, stderr, exitCode: code }));
       let result;
@@ -100,7 +110,8 @@ const createClaudeRunner = (config = {}) => {
       } catch (error) { return reject(new Error(`Claude runner returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`)); }
       if (result?.subtype !== "success" || result.is_error !== false || result.terminal_reason !== "completed" || typeof result.session_id !== "string" || !result.structured_output || typeof result.structured_output !== "object" || !Object.hasOwn(result.structured_output, "prediction")) return reject(new Error("Claude runner result does not match the verified structured output contract."));
       return resolve({ ...(preparedIsolation ? { isolationEvidence: preparedIsolation.isolationEvidence } : {}), prediction: result.structured_output.prediction, ...(result.usage ? { usage: result.usage } : {}), events, provider: { ref: "provider:claude", modelId: model.id.trim(), sessionId: result.session_id } });
-    }));
+      });
+    });
   });
   return async input => {
     if (!input.isolation) return run(input);

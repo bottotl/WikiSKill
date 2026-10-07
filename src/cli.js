@@ -18,6 +18,7 @@ wikiskill experiment audit --dataset <dataset.json> --target <skill-id> [--skill
 wikiskill experiment audit --experiment <experiment.json> --json
 wikiskill experiment run --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> [--runtime-profile <profile.json> | --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count>] [--empty] [--run-id <id>] --json-events
 wikiskill run audit --run-root <run-root> --workspace <workspace> [--candidate <id>] --json
+wikiskill run replay-score --run-root <run-root> --workspace <workspace> --candidate <id> --output <dir> [--runner-timeout-ms <ms>] [--timeout-ms <ms>] --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
@@ -39,7 +40,7 @@ const SUBCOMMANDS = Object.freeze({
   context: new Set(["prepare", "skill-get", "receipt", "receipts"]),
   evolution: new Set(["baseline"]),
   experiment: new Set(["prepare", "audit", "run"]),
-  run: new Set(["audit"]),
+  run: new Set(["audit", "replay-score"]),
   bootstrap: new Set(["install", "uninstall"]),
   dataset: new Set(["validate", "verify-known-fix", "compile-commit", "recommend-commit"]),
   repository: new Set(["snapshot"]),
@@ -75,6 +76,7 @@ const VALUE_FLAGS = Object.freeze({
   "--iterations": "iterationLimit",
   "--max-provider-launches": "maxProviderLaunches",
   "--runner-timeout-ms": "runnerTimeoutMs",
+  "--timeout-ms": "timeoutMs",
   "--receipt": "receipt",
   "--state-root": "stateRoot",
   "--context": "contextId",
@@ -314,10 +316,24 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       data = { schema: "wikiskill.experiment-audit.v1", datasetPath, targetSkill, mode, splitCounts: result.splitCounts, ...(experimentPath ? { experimentPath } : {}) };
       return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve every blocker, then rerun the canonical dataset validation and experiment audit."] : []), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "run") {
-      if (options.subcommand !== "audit" || !options.runRoot || !options.workspace) throw new Error("run audit requires --run-root and --workspace.");
-      const result = require("./audit/run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace), ...(options.candidate ? { candidate: options.candidate } : {}) });
-      data = { schema: "wikiskill.run-audit.v1", ...result.data };
-      return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the run evidence blockers before candidate publication."] : []), result.blockers.length ? 1 : 0, io);
+      if (options.subcommand === "audit") {
+        if (!options.runRoot || !options.workspace) throw new Error("run audit requires --run-root and --workspace.");
+        const result = require("./audit/run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace), ...(options.candidate ? { candidate: options.candidate } : {}) });
+        data = { schema: "wikiskill.run-audit.v1", ...result.data };
+        return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the run evidence blockers before candidate publication."] : []), result.blockers.length ? 1 : 0, io);
+      }
+      if (options.subcommand !== "replay-score") throw new Error("Only `run audit` and `run replay-score` are supported.");
+      if (!options.runRoot || !options.workspace || !options.candidate || !options.outputPath) throw new Error("run replay-score requires --run-root, --workspace, --candidate, and --output.");
+      const result = await withAbort((signal) => require("./replay-score").replayCandidateScore({
+        runRoot: path.resolve(options.runRoot),
+        workspace: path.resolve(options.workspace),
+        candidate: options.candidate,
+        output: path.resolve(options.outputPath),
+        ...(options.runnerTimeoutMs !== undefined ? { runnerTimeoutMs: options.runnerTimeoutMs } : {}),
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+        abortSignal: signal
+      }));
+      return output(core.ENVELOPE(result.data, result.warnings, result.blockers, result.nextActions), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "bootstrap") {
       if (options.subcommand !== "install" && options.subcommand !== "uninstall") throw new Error("Only `bootstrap install` and `bootstrap uninstall` are supported.");
       if (typeof options.bootstrapCommand !== "string" || !options.bootstrapCommand.trim()) throw new Error("bootstrap requires --command.");

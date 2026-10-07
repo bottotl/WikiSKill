@@ -845,8 +845,9 @@ async function createRun(config) {
   await fsp.writeFile(path.join(runRoot, "wiki", "log.md"), "# Evolution Log\n");
   await fsp.writeFile(path.join(runRoot, "wiki", "skill-impact.md"), "# Skill Impact\n");
   await fsp.mkdir(path.join(runRoot, "tasks"), { recursive: true });
-  await fsp.writeFile(path.join(runRoot, "tasks", "task-set.json"), json(dataset));
-  await fsp.writeFile(path.join(runRoot, "dataset", "dataset.json"), json(dataset));
+  const taskSetBytes = json(dataset);
+  await fsp.writeFile(path.join(runRoot, "tasks", "task-set.json"), taskSetBytes);
+  await fsp.writeFile(path.join(runRoot, "dataset", "dataset.json"), taskSetBytes);
   const sourceSkills = [
     ...targetSkills.map((skill) => ({ id: skill.id, role: "target", path: skill.path, files: skill.files })),
     ...contextSkills.map((skill) => ({ id: skill.id, role: "context", path: skill.path, files: skill.files })),
@@ -887,7 +888,7 @@ async function createRun(config) {
     workspaceOnlyFiles,
     engine: { version: ENGINE_VERSION },
     ...(config.configDigest ? { configDigest: config.configDigest } : {}),
-    dataset: { digest: dataset.digest, adapter: dataset.adapter },
+    dataset: { digest: dataset.digest, adapter: dataset.adapter, taskSetDigest: digestText(taskSetBytes) },
     adapterModule: config.adapterModule,
     adapterConfig: config.adapterConfig,
     adapterDigest: digestText(json({ adapter: dataset.adapter, adapterModule: config.adapterModule, adapterConfig: config.adapterConfig })),
@@ -1455,4 +1456,4 @@ async function diffRun(runOrId, stateRoot) {
 }
 async function retryRun(runOrId, options = {}) { return runEvolution(runOrId, options); }
 
-module.exports = { DATASET_SCHEMA, TRAJECTORY_SCHEMA, ENVELOPE, WikiSkillError, validateDataset, inspectRepository, createRun, runEvolution, retryRun, statusRun, diffRun, applyRun, rollbackRun, exportWiki, digestText, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap, renderInferencePrompt, configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution, applyCandidate, diffCandidate, rollbackReceipt, prepareContext, getContextSkill, listContextSkillReceipts, recordContextSkillUse };
+module.exports = { DATASET_SCHEMA, TRAJECTORY_SCHEMA, ENVELOPE, WikiSkillError, validateDataset, inspectRepository, createRun, runEvolution, retryRun, statusRun, diffRun, applyRun, rollbackRun, exportWiki, digestText, doctorWorkspace, initWorkspace, uninstallWorkspace, updateBootstrap, renderInferencePrompt, configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution, applyCandidate, diffCandidate, rollbackReceipt, prepareContext, getContextSkill, listContextSkillReceipts, recordContextSkillUse, makeTrace, inspectMaterializedSkillSet };

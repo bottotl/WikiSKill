@@ -108,8 +108,16 @@ const auditRun = (runRoot, { workspace, candidate } = {}) => {
   const warnings = [];
   const manifest = readJson(path.join(runRoot, "manifest.json"));
   const state = readJson(path.join(runRoot, "runs", "state.json"));
-  const taskSet = readJson(path.join(runRoot, "tasks", "task-set.json"));
+  const taskSetText = fs.readFileSync(path.join(runRoot, "tasks", "task-set.json"), "utf8");
+  const taskSet = JSON.parse(taskSetText);
   if (state.status !== "completed") blockers.push(`Run status is ${String(state.status)}, expected completed.`);
+  if (manifest.dataset?.taskSetDigest !== undefined) {
+    if (!HEX64.test(manifest.dataset.taskSetDigest)) blockers.push("Run manifest frozen task-set digest must be a lowercase SHA-256 hex digest.");
+    else if (sha256Hex(taskSetText) !== manifest.dataset.taskSetDigest) blockers.push("Run task-set bytes differ from the manifest frozen task-set digest; the frozen tasks cannot be trusted.");
+  } else if (manifest.dataset) {
+    warnings.push("Run manifest predates frozen task-set byte digests; the persisted task set cannot be re-verified against creation-time evidence.");
+  }
+  if (manifest.dataset?.digest !== undefined && taskSet.digest !== manifest.dataset.digest) blockers.push("Run task-set self digest differs from the manifest dataset digest.");
 
   let rawReference = null;
   let rawDigest = null;

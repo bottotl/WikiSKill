@@ -65,6 +65,40 @@ test("Claude runner rejects source-session environment overlays before launch", 
   await assert.rejects(runner({ systemPrompt: "skill", input: {}, workdir, tools: [], model: { id: "model" } }), /must not define source-session environment key/u);
 });
 
+test("Claude runner escalates an ignored abort SIGTERM to SIGKILL and collects the subprocess", async () => {
+  const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-claude-abort-"));
+  const script = path.join(workdir, "fake-claude-hang.cjs");
+  await fs.writeFile(script, `const fs = require("node:fs");
+const path = require("node:path");
+process.on("SIGTERM", () => { fs.writeFileSync(path.join(__dirname, "saw-sigterm"), "1"); });
+fs.writeFileSync(path.join(__dirname, "hang-pid"), String(process.pid));
+setInterval(() => {}, 1000);
+`);
+  const controller = new AbortController();
+  const runner = createClaudeRunner({ executable: process.execPath, executableArgs: [script], timeoutMs: 60_000 });
+  const waitFor = async (target) => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const content = await fs.readFile(target, "utf8").catch(() => null);
+      if (content !== null) return content;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`Timed out waiting for ${target}`);
+  };
+  const pending = assert.rejects(
+    runner({ systemPrompt: "coding", input: { task: "fix" }, workdir, tools: ["workspace"], model: { id: "model" }, abortSignal: controller.signal }),
+    (error) => {
+      assert.match(error.message, /Claude runner aborted/u);
+      assert.equal(error.wikiskillDiagnostics.aborted, true);
+      return true;
+    }
+  );
+  const pid = Number(await waitFor(path.join(workdir, "hang-pid")));
+  controller.abort();
+  await pending;
+  assert.equal(await fs.readFile(path.join(workdir, "saw-sigterm"), "utf8").then(() => "present", () => "absent"), "present");
+  assert.throws(() => process.kill(pid, 0), (error) => error.code === "ESRCH");
+});
+
 test("Claude runner preserves partial stream diagnostics on timeout", async () => {
   const workdir = await fs.mkdtemp(path.join(os.tmpdir(), "wikiskill-claude-timeout-"));
   const script = path.join(workdir, "fake-claude.cjs");

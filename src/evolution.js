@@ -191,6 +191,16 @@ const stageCandidate = async (workspace, runRoot, targetSkill, baselineDigest, s
   return candidate;
 };
 
+const createRuntimeAdapter = ({ scorerRef, toolProfile, score }) => ({
+  prepareEnvironment: async ({ workdir, task }) => WORKSPACE_SCORERS.has(scorerRef) ? initializeTaskRepository(workdir, task.repositorySnapshot ? await require("./repository-snapshot").snapshotDependencyFiles(task.repositorySnapshot) : task.sandbox) : workdir,
+  resolveTools: () => toolProfile === "workspace" ? ["workspace"] : [],
+  disposeEnvironment: ({ workdir }) => WORKSPACE_SCORERS.has(scorerRef) ? fs.rm(workdir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) : undefined,
+  score: ({ task, prediction, groundTruth, environment, workdir, split, iteration }) => {
+    if (task.evaluator.capabilityRef !== scorerRef) throw new Error(`Task scorer ref differs from the frozen runtime cohort: ${task.id}`);
+    return score({ taskId: task.id, prediction, privateInput: groundTruth, environment, workdir, split, iteration });
+  }
+});
+
 const absoluteModule = (workspace, value) => typeof value === "string" ? path.resolve(workspace, value) : value;
 
 const validateModulePath = async (workspace, value, label) => {
@@ -382,15 +392,7 @@ async function evolveWorkspace(workspaceInput, targetSkill, options = {}) {
     const resolvedScorer = registry.resolveScorer(selection.cohort.scorerRef, evolution.runtime?.scorerConfig || {});
     runtime = { runnerRef, scorerRef: selection.cohort.scorerRef, provider: selection.cohort.provider, modelId: selection.cohort.modelId, reasoningEffort, toolProfile, launchBudget: { unit: "provider_launches", limit: maxProviderLaunches }, runner: resolvedRunner.descriptor, scorer: resolvedScorer.descriptor };
     runtimeRunner = resolvedRunner.run;
-    runtimeAdapter = {
-      prepareEnvironment: async ({ workdir, task }) => WORKSPACE_SCORERS.has(runtime.scorerRef) ? initializeTaskRepository(workdir, task.repositorySnapshot ? await require("./repository-snapshot").snapshotDependencyFiles(task.repositorySnapshot) : task.sandbox) : workdir,
-      resolveTools: () => runtime.toolProfile === "workspace" ? ["workspace"] : [],
-      disposeEnvironment: ({ workdir }) => WORKSPACE_SCORERS.has(runtime.scorerRef) ? fs.rm(workdir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }) : undefined,
-      score: ({ task, prediction, groundTruth, environment, workdir, split, iteration }) => {
-        if (task.evaluator.capabilityRef !== runtime.scorerRef) throw new Error(`Task scorer ref differs from the frozen runtime cohort: ${task.id}`);
-        return resolvedScorer.score({ taskId: task.id, prediction, privateInput: groundTruth, environment, workdir, split, iteration });
-      }
-    };
+    runtimeAdapter = createRuntimeAdapter({ scorerRef: runtime.scorerRef, toolProfile: runtime.toolProfile, score: (input) => resolvedScorer.score(input) });
   }
   if ((!options.maintainer && !maintainerModule && !learningAgent) || (!options.proposer && !proposerModule && !learningAgent)) {
     const learningAgentRef = runtime?.provider ? learningRefForProvider(runtime.provider) : "builtin:codex-cli-v1";
@@ -566,4 +568,4 @@ async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
   return { runId, ...(launchBudget ? { launchBudget } : {}), manifest: status.manifest, state: status.state, ...(result ? { result } : {}), ...(runtimeEvidence ? { runtimeEvidence } : {}) };
 }
 
-module.exports = { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution, sortedFiles, treeDigest };
+module.exports = { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution, loadWorkspace, createRuntimeAdapter, sortedFiles, treeDigest };
