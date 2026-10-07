@@ -2,6 +2,7 @@
 
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
@@ -19,21 +20,21 @@ const digest = (value) => `sha256:${crypto.createHash("sha256").update(value).di
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 const exists = async (target) => fs.access(target).then(() => true, () => false);
 
-const sortedFiles = async (root) => {
-  const rootStat = await fs.lstat(root);
+const sortedFiles = (root) => {
+  const rootStat = fsSync.lstatSync(root);
   if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error(`WikiSkill authority root must be a non-symlink directory: ${root}`);
   const files = [];
-  const visit = async (directory) => {
-    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+  const visit = (directory) => {
+    for (const entry of fsSync.readdirSync(directory, { withFileTypes: true })) {
       const target = path.join(directory, entry.name);
-      const stat = await fs.lstat(target);
+      const stat = fsSync.lstatSync(target);
       if (stat.isSymbolicLink()) throw new Error(`WikiSkill authority path must not be a symlink: ${path.relative(root, target)}`);
-      if (stat.isDirectory()) await visit(target);
+      if (stat.isDirectory()) visit(target);
       else if (stat.isFile()) files.push(target);
       else throw new Error(`Unsupported WikiSkill authority entry: ${path.relative(root, target)}`);
     }
   };
-  await visit(root);
+  visit(root);
   return files.sort();
 };
 
@@ -46,11 +47,11 @@ const copyTree = async (source, destination) => {
   }
 };
 
-const treeDigest = async (root) => {
+const treeDigest = (root, files = sortedFiles(root)) => {
   const hash = crypto.createHash("sha256");
-  for (const file of await sortedFiles(root)) {
+  for (const file of files) {
     hash.update(`${path.relative(root, file).split(path.sep).join("/")}\0`);
-    hash.update(await fs.readFile(file));
+    hash.update(fsSync.readFileSync(file));
     hash.update("\0");
   }
   return `sha256:${hash.digest("hex")}`;
@@ -565,4 +566,4 @@ async function statusWorkspaceEvolution(workspaceInput, runId, options = {}) {
   return { runId, ...(launchBudget ? { launchBudget } : {}), manifest: status.manifest, state: status.state, ...(result ? { result } : {}), ...(runtimeEvidence ? { runtimeEvidence } : {}) };
 }
 
-module.exports = { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution };
+module.exports = { configureEvolution, evolveWorkspace, inspectEvolutionBaseline, statusWorkspaceEvolution, sortedFiles, treeDigest };

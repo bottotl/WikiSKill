@@ -9,6 +9,7 @@ const test = require("node:test");
 
 const { auditExperiment } = require("../src/audit/experiment");
 const { auditRun } = require("../src/audit/run");
+const { treeDigest } = require("../src/evolution");
 const { validateDataset } = require("../src");
 
 const exactTask = (id, split, instruction) => ({
@@ -276,17 +277,38 @@ test("terminal run audit verifies the Raw receipt, strict gating, final-only tes
 
   const authorityRoot = path.join(workspace, ".wikiskill", "raw", "evolutions", "run-1");
   fs.mkdirSync(authorityRoot, { recursive: true });
-  const rawDigest = `sha256:${"e".repeat(64)}`;
+  fs.cpSync(path.join(root, "raw"), path.join(authorityRoot, "raw"), { recursive: true });
+  const rawDigest = treeDigest(path.join(authorityRoot, "raw"));
   fs.writeFileSync(path.join(authorityRoot, "manifest.json"), JSON.stringify({ schema: "wikiskill.evolution-raw.v1", runId: "run-1", rawDigest }));
   fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest }));
   const result = auditRun(root, { workspace });
   assert.deepEqual(result.blockers, []);
+  assert.deepEqual(result.warnings, []);
   assert.equal(result.data.activeSkillSetDigest, activeSkillSetDigest);
   assert.equal(result.data.activeSkills.length, 2);
+  assert.equal(result.data.rawDigest, rawDigest);
+  assert.equal(result.data.rawReference, ".wikiskill/raw/evolutions/run-1");
   const cli = spawnSync(process.execPath, [path.join(__dirname, "..", "bin", "wikiskill"), "run", "audit", "--run-root", root, "--workspace", workspace, "--json"], { encoding: "utf8" });
   assert.equal(cli.status, 0, cli.stdout || cli.stderr);
   assert.equal(JSON.parse(cli.stdout).data.schema, "wikiskill.run-audit.v1");
+  assert.equal(JSON.parse(cli.stdout).data.rawDigest, rawDigest);
 
   fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest: `sha256:${"f".repeat(64)}` }));
   assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /receipt does not match/u.test(blocker)), true);
+  fs.writeFileSync(path.join(root, "result", "raw-authority.json"), JSON.stringify({ schema: "wikiskill.raw-authority-receipt.v1", runId: "run-1", rawRef: ".wikiskill/raw/evolutions/run-1", rawDigest }));
+
+  const tamperedTracePath = path.join(root, "raw", "traces", "iter-01", "train", "train-1.json");
+  const tamperedTrace = JSON.parse(fs.readFileSync(tamperedTracePath, "utf8"));
+  fs.writeFileSync(tamperedTracePath, JSON.stringify({ ...tamperedTrace, provider: { ...tamperedTrace.provider, modelId: "tampered-model" } }));
+  assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /Terminal run Raw tree content differs/u.test(blocker)), true);
+  fs.writeFileSync(tamperedTracePath, JSON.stringify(tamperedTrace));
+
+  fs.symlinkSync("/etc/hosts", path.join(authorityRoot, "raw", "traces", "link.json"));
+  assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /cannot be verified.*symlink/us.test(blocker)), true);
+  fs.rmSync(path.join(authorityRoot, "raw", "traces", "link.json"));
+
+  fs.renameSync(path.join(root, "raw"), path.join(root, "raw-moved"));
+  assert.equal(auditRun(root, { workspace }).blockers.some((blocker) => /cannot be verified/u.test(blocker)), true);
+  fs.renameSync(path.join(root, "raw-moved"), path.join(root, "raw"));
+  assert.deepEqual(auditRun(root, { workspace }).blockers, []);
 });

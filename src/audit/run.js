@@ -4,10 +4,16 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { aggregateOperationalOutcomes, compareOperationalAggregates, isOperationalAggregate, isOperationalAggregateSaturated, isOperationalOutcome, validateOperationalOutcome } = require("../operational-outcome");
+const { sortedFiles, treeDigest } = require("../evolution");
 
 const SHA256 = /^sha256:[0-9a-f]{64}$/u;
+const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+const RESULT_SEMANTIC_KEYS = ["engine", "configDigest", "dataset", "adapterDigest", "runnerDigest", "modelDigest", "proposalHistory", "baselineValidationScore", "finalValidationScore", "testScore", "acceptedIterations", "earlyStopped", "earlyStopReason", "changesPatchDigest", "reversePatchDigest"];
 const readJson = (target) => JSON.parse(fs.readFileSync(target, "utf8"));
 const sha256 = (value) => `sha256:${crypto.createHash("sha256").update(value).digest("hex")}`;
+const sha256Hex = (value) => crypto.createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+const canonicalJson = (value) => `${JSON.stringify(value, null, 2)}\n`;
+const skillTreeDigest = (root, excludedFiles) => treeDigest(root, sortedFiles(root).filter((file) => !excludedFiles.has(path.relative(root, file).split(path.sep).join("/"))));
 const numericScore = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 const compare = (candidate, baseline) => {
   if (numericScore(candidate) && numericScore(baseline)) return { improves: candidate > baseline, equal: candidate === baseline, order: Math.sign(candidate - baseline), regressions: [] };
@@ -30,7 +36,7 @@ const visitJson = (root) => {
   return files.sort();
 };
 
-const auditRun = (runRoot, { workspace } = {}) => {
+const auditRun = (runRoot, { workspace, candidate } = {}) => {
   const blockers = [];
   const warnings = [];
   const manifest = readJson(path.join(runRoot, "manifest.json"));
@@ -38,16 +44,25 @@ const auditRun = (runRoot, { workspace } = {}) => {
   const taskSet = readJson(path.join(runRoot, "tasks", "task-set.json"));
   if (state.status !== "completed") blockers.push(`Run status is ${String(state.status)}, expected completed.`);
 
+  let rawReference = null;
+  let rawDigest = null;
   if (!workspace) blockers.push("Workspace is required to verify the immutable Raw authority.");
   else {
     const expectedRawRef = `.wikiskill/raw/evolutions/${manifest.runId}`;
+    rawReference = expectedRawRef;
     if (manifest.rawReferencePrefix !== expectedRawRef) blockers.push("Run manifest has an invalid Raw authority reference.");
     else {
       try {
-        const authorityManifest = readJson(path.join(path.resolve(workspace), expectedRawRef, "manifest.json"));
+        const authorityRoot = path.join(path.resolve(workspace), expectedRawRef);
+        const authorityManifest = readJson(path.join(authorityRoot, "manifest.json"));
         const receipt = readJson(path.join(runRoot, "result", "raw-authority.json"));
         if (authorityManifest.schema !== "wikiskill.evolution-raw.v1" || authorityManifest.runId !== manifest.runId || !SHA256.test(authorityManifest.rawDigest || "")) blockers.push("Persisted Raw authority manifest is invalid.");
         if (receipt.schema !== "wikiskill.raw-authority-receipt.v1" || receipt.runId !== manifest.runId || receipt.rawRef !== expectedRawRef || receipt.rawDigest !== authorityManifest.rawDigest) blockers.push("Terminal Raw authority receipt does not match its manifest.");
+        const authorityRawDigest = treeDigest(path.join(authorityRoot, "raw"));
+        const runRawDigest = treeDigest(path.join(runRoot, "raw"));
+        if (authorityRawDigest !== authorityManifest.rawDigest) blockers.push("Persisted Raw authority tree content does not match its manifest digest.");
+        if (runRawDigest !== authorityManifest.rawDigest) blockers.push("Terminal run Raw tree content differs from the persisted Raw authority.");
+        if (authorityRawDigest === runRawDigest && authorityRawDigest === authorityManifest.rawDigest) rawDigest = authorityRawDigest;
       } catch (error) {
         blockers.push(`Persisted Raw authority cannot be verified: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -142,9 +157,76 @@ const auditRun = (runRoot, { workspace } = {}) => {
     blockers.push("Run state dataset_saturated does not match its baseline validation aggregate.");
   }
 
+  let candidateSummary = null;
+  if (candidate !== undefined) {
+    if (typeof candidate !== "string" || !SAFE_ID.test(candidate)) blockers.push("Candidate id must be a safe identifier.");
+    else if (!workspace) blockers.push("Candidate audit requires the Workspace Raw authority.");
+    else {
+      try {
+        const candidateRoot = path.join(path.resolve(workspace), ".wikiskill", "candidates", candidate);
+        const staged = readJson(path.join(candidateRoot, "candidate.json"));
+        const [targetSkill] = manifest.targetSkills || [];
+        if (staged.schema !== "wikiskill.candidate.v1" || staged.candidateId !== candidate || staged.status !== "validation_accepted") blockers.push("Staged candidate manifest is invalid.");
+        if (!targetSkill || staged.targetSkill !== targetSkill.id) blockers.push("Candidate target Skill differs from the audited run.");
+        if (staged.runId !== manifest.runId || staged.runId !== path.basename(runRoot)) blockers.push("Candidate run identity differs from the audited run.");
+        if (!same(staged.configDigest ?? null, manifest.configDigest ?? null)) blockers.push("Candidate config digest differs from the run manifest.");
+        if (!same(staged.frozenComponents ?? null, manifest.frozenComponents ?? null)) blockers.push("Candidate frozen components differ from the run manifest.");
+        if (!Array.isArray(staged.acceptedIterations) || !same(staged.acceptedIterations, state.acceptedIterations || [])) blockers.push("Candidate accepted iterations differ from the run state.");
+        if (!same(staged.baselineValidationScore, state.baselineValidationScore)) blockers.push("Candidate baseline validation score differs from the run state.");
+        if (!same(staged.candidateValidationScore, state.bestValidationScore)) blockers.push("Candidate best validation score differs from the run state.");
+        if (!same(staged.testScore, state.testScore)) blockers.push("Candidate test score differs from the run state.");
+        if (!operationalRun) blockers.push("Candidate audit accepts only completed operational runs.");
+        if (!(taskSet.tasks || []).some((task) => task.split === "test")) blockers.push("Candidate audit requires held-out test tasks with both baseline and final evaluations.");
+        if (!isOperationalAggregate(state.baselineTestScore) || !isOperationalAggregate(state.testScore)) blockers.push("Candidate audit requires operational held-out test aggregates.");
+        const testComparison = compare(state.testScore, state.baselineTestScore);
+        if (state.candidateBlockedReason === "heldout_operational_regression" || (testComparison && (testComparison.regressions.length > 0 || testComparison.order < 0))) blockers.push("Candidate run has a held-out operational regression and must not be published.");
+        if (staged.baselineDigest) {
+          if (!SHA256.test(staged.baselineDigest)) blockers.push("Candidate baseline digest must be a sha256 digest.");
+          else if (typeof staged.targetSkill === "string" && SAFE_ID.test(staged.targetSkill)) {
+            const snapshotRoot = path.join(runRoot, "skills", "snapshots", staged.targetSkill);
+            const workspaceOnly = new Set(manifest.workspaceOnlyFiles?.[staged.targetSkill] || []);
+            if (skillTreeDigest(snapshotRoot, workspaceOnly) !== staged.baselineDigest) blockers.push("Candidate baseline digest differs from the run baseline Skill tree.");
+          }
+        } else if (manifest.mode !== "empty") blockers.push("Candidate baseline digest is missing for a seeded run.");
+        if (!SHA256.test(staged.resultDigest || "")) blockers.push("Candidate result digest must be a sha256 digest.");
+        else if (typeof staged.targetSkill === "string" && SAFE_ID.test(staged.targetSkill)) {
+          if (treeDigest(path.join(candidateRoot, "skill")) !== staged.resultDigest) blockers.push("Staged candidate Skill tree does not match its result digest.");
+          if (treeDigest(path.join(runRoot, "result", "skills", staged.targetSkill)) !== staged.resultDigest) blockers.push("Run result Skill tree does not match the staged candidate.");
+        }
+        const expectedCandidateId = `candidate-${sha256Hex(`${staged.targetSkill}\0${staged.baselineDigest}\0${staged.resultDigest}`).slice(0, 24)}`;
+        if (expectedCandidateId !== candidate) blockers.push("Candidate identity digest is invalid.");
+        const result = readJson(path.join(runRoot, "result", "result.json"));
+        if (result.schema !== "wikiskill.result.v1" || result.runId !== manifest.runId) blockers.push("Run result identity is invalid.");
+        if (!same(result.configDigest ?? null, manifest.configDigest ?? null)) blockers.push("Run result config digest differs from the run manifest.");
+        if (!same(result.baselineValidationScore, state.baselineValidationScore) || !same(result.finalValidationScore, state.bestValidationScore) || !same(result.testScore, state.testScore) || !same(result.acceptedIterations || [], state.acceptedIterations || [])) blockers.push("Run result scores differ from the terminal run state.");
+        const semantic = {};
+        for (const key of RESULT_SEMANTIC_KEYS) if (key in result) semantic[key] = result[key];
+        if (sha256Hex(canonicalJson(semantic)) !== result.semanticResultDigest) blockers.push("Run result semantic digest does not match its content.");
+        candidateSummary = {
+          candidateId: staged.candidateId,
+          runId: staged.runId,
+          targetSkill: staged.targetSkill,
+          status: staged.status,
+          baselineDigest: staged.baselineDigest ?? null,
+          resultDigest: staged.resultDigest ?? null,
+          baselineValidationScore: staged.baselineValidationScore,
+          candidateValidationScore: staged.candidateValidationScore,
+          testScore: staged.testScore,
+          acceptedIterations: staged.acceptedIterations ?? [],
+          configDigest: staged.configDigest ?? null
+        };
+      } catch (error) {
+        blockers.push(`Candidate cannot be verified: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
   return {
     blockers: [...new Set(blockers)],
-    warnings: [...new Set(warnings)],
+    warnings: [...new Set([
+      ...warnings,
+      ...(candidate !== undefined ? ["Zero blockers verifies consistency with the persisted Raw authority; it is not an independent or unforgeable evaluation proof."] : [])
+    ])],
     data: {
       runId: manifest.runId,
       status: state.status,
@@ -156,7 +238,10 @@ const auditRun = (runRoot, { workspace } = {}) => {
       baselineValidationScore: state.baselineValidationScore,
       bestValidationScore: state.bestValidationScore,
       baselineTestScore: state.baselineTestScore,
-      testScore: state.testScore
+      testScore: state.testScore,
+      rawReference,
+      rawDigest,
+      ...(candidateSummary ? { candidate: candidateSummary } : {})
     }
   };
 };

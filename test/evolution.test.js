@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -57,6 +58,27 @@ const baselineFor = async (workspace, targetSkill, empty = false) => {
   const code = await execute(["evolution", "baseline", "--workspace", workspace, "--target", targetSkill, ...(empty ? ["--empty"] : []), "--json"], { stdout: (line) => output.push(line), stderr: () => {} });
   assert.equal(code, 0, output.join(""));
   return JSON.parse(output.join("")).data;
+};
+
+const makeWritable = async (target) => {
+  const stat = await fs.lstat(target);
+  if (stat.isDirectory()) {
+    await fs.chmod(target, 0o755);
+    for (const entry of await fs.readdir(target)) await makeWritable(path.join(target, entry));
+  } else await fs.chmod(target, 0o644);
+};
+
+const firstFile = async (directory) => {
+  const files = [];
+  const walk = async (current) => {
+    for (const entry of await fs.readdir(current, { withFileTypes: true })) {
+      const target = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(target);
+      else if (entry.isFile()) files.push(target);
+    }
+  };
+  await walk(directory);
+  return files.sort()[0];
 };
 
 const adapter = {
@@ -229,6 +251,201 @@ test("operational held-out milestone regression prevents candidate staging", asy
   assert.deepEqual(result.state.acceptedIterations, [1]);
   assert.deepEqual(result.state.testComparison.regressions, [{ taskId: "test", lostMilestones: ["M1", "M2"] }]);
   assert.equal(result.candidate, null);
+});
+
+test("run audit binds a staged operational candidate to its Raw authority, result, and Skill trees", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const operationalRunner = async ({ task, skills }) => ({
+    prediction: { improved: skills.target["target-skill"]["SKILL.md"].includes("improved procedure") },
+    events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+  });
+  const operationalAdapter = {
+    ...adapter,
+    score: ({ prediction }) => {
+      const verifiedMilestones = prediction.improved ? ["M0", "M1", "M2"] : ["M0", "M1"];
+      return {
+        score: {
+          schema: "wikiskill.operational-outcome.v1",
+          eligible: true,
+          terminalSuccess: prediction.improved,
+          verifiedMilestones,
+          highestVerifiedMilestone: verifiedMilestones.length - 1,
+          verifiedMilestoneCount: verifiedMilestones.length,
+          actionableBlockersRemoved: prediction.improved ? 1 : 0,
+          unauthorizedWrites: 0,
+          unrecoveredUserChanges: 0,
+          diagnosisVerifierPassed: true
+        },
+        evidence: { source: "test-harness" }
+      };
+    }
+  };
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-candidate-audit",
+    adapter: operationalAdapter,
+    runner: operationalRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+
+  const candidateId = result.candidate.candidateId;
+  const audited = auditRun(result.runRoot, { workspace, candidate: candidateId });
+  assert.deepEqual(audited.blockers, []);
+  assert.equal(audited.data.rawDigest, result.rawDigest);
+  assert.equal(audited.data.rawReference, ".wikiskill/raw/evolutions/operational-candidate-audit");
+  assert.equal(audited.data.candidate.candidateId, candidateId);
+  assert.equal(audited.data.candidate.runId, "operational-candidate-audit");
+  assert.equal(audited.data.candidate.targetSkill, "target-skill");
+  assert.equal(audited.data.candidate.resultDigest, result.candidate.resultDigest);
+  assert.equal(audited.data.candidate.testScore.terminalSuccessCount, 1);
+  assert.equal(audited.data.candidate.acceptedIterations.length, 1);
+  assert.match(audited.warnings.join("\n"), /not an independent or unforgeable evaluation proof/u);
+
+  const output = [];
+  const code = await execute(["run", "audit", "--run-root", result.runRoot, "--workspace", workspace, "--candidate", candidateId, "--json"], { stdout: (line) => output.push(line), stderr: () => {} });
+  assert.equal(code, 0, output.join(""));
+  const cliOutput = JSON.parse(output.join(""));
+  assert.equal(cliOutput.data.schema, "wikiskill.run-audit.v1");
+  assert.equal(cliOutput.data.candidate.candidateId, candidateId);
+  assert.equal(cliOutput.data.rawDigest, result.rawDigest);
+
+  const candidateRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+  await makeWritable(candidateRoot);
+  const candidateManifestPath = path.join(candidateRoot, "candidate.json");
+  const staged = JSON.parse(await fs.readFile(candidateManifestPath, "utf8"));
+
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify({ ...staged, runId: "operational-other-run" }, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Candidate run identity differs/u);
+
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify({ ...staged, testScore: { ...staged.testScore, terminalSuccessCount: staged.testScore.terminalSuccessCount + 1 } }, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Candidate test score differs/u);
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify(staged, null, 2)}\n`);
+
+  const skillPath = path.join(candidateRoot, "skill", "SKILL.md");
+  const skillText = await fs.readFile(skillPath, "utf8");
+  await fs.writeFile(skillPath, `${skillText}\nTampered.\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Staged candidate Skill tree does not match/u);
+  await fs.writeFile(skillPath, skillText);
+
+  const forgedId = `candidate-${crypto.createHash("sha256").update("forged-candidate-identity").digest("hex").slice(0, 24)}`;
+  const forgedRoot = path.join(workspace, ".wikiskill", "candidates", forgedId);
+  await fs.mkdir(forgedRoot, { recursive: true });
+  fsSync.cpSync(path.join(candidateRoot, "skill"), path.join(forgedRoot, "skill"), { recursive: true });
+  await fs.writeFile(path.join(forgedRoot, "candidate.json"), `${JSON.stringify({ ...staged, candidateId: forgedId }, null, 2)}\n`);
+  assert.deepEqual(auditRun(result.runRoot, { workspace, candidate: forgedId }).blockers, ["Candidate identity digest is invalid."]);
+
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify({ ...staged, baselineDigest: `sha256:${"0".repeat(64)}` }, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Candidate identity digest is invalid/u);
+  await fs.writeFile(candidateManifestPath, `${JSON.stringify(staged, null, 2)}\n`);
+
+  const authorityRawRoot = path.join(workspace, ".wikiskill", "raw", "evolutions", "operational-candidate-audit", "raw");
+  await makeWritable(authorityRawRoot);
+  const authorityTracePath = await firstFile(authorityRawRoot);
+  const authorityTraceText = await fs.readFile(authorityTracePath, "utf8");
+  const authorityTrace = JSON.parse(authorityTraceText);
+  await fs.writeFile(authorityTracePath, JSON.stringify({ ...authorityTrace, prediction: { ...authorityTrace.prediction, improved: false } }));
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Persisted Raw authority tree content does not match/u);
+  await fs.writeFile(authorityTracePath, authorityTraceText);
+
+  const resultPath = path.join(result.runRoot, "result", "result.json");
+  const resultJson = JSON.parse(await fs.readFile(resultPath, "utf8"));
+  await fs.writeFile(resultPath, `${JSON.stringify({ ...resultJson, testScore: { ...resultJson.testScore, terminalSuccessCount: resultJson.testScore.terminalSuccessCount + 1 } }, null, 2)}\n`);
+  assert.match(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers.join("\n"), /Run result scores differ from the terminal run state/u);
+  await fs.writeFile(resultPath, `${JSON.stringify(resultJson, null, 2)}\n`);
+
+  assert.deepEqual(auditRun(result.runRoot, { workspace, candidate: candidateId }).blockers, []);
+});
+
+test("run audit rejects a fabricated candidate for a held-out operational regression run", async () => {
+  const { workspace, stateRoot, datasetPath } = await setup();
+  const dataset = JSON.parse(await fs.readFile(datasetPath, "utf8"));
+  for (const task of dataset.tasks) task.evaluator.capabilityRef = "scorer:operational-test";
+  await fs.writeFile(datasetPath, `${JSON.stringify(dataset, null, 2)}\n`);
+  const operationalRunner = async ({ task, skills }) => {
+    const improved = skills.target["target-skill"]["SKILL.md"].includes("improved procedure");
+    const regressedTest = task.split === "test" && improved;
+    const verifiedMilestones = regressedTest ? ["M0"] : improved || task.split === "test" ? ["M0", "M1", "M2"] : ["M0", "M1"];
+    return {
+      prediction: { verifiedMilestones, terminalSuccess: verifiedMilestones.length === 3 },
+      events: [{ type: "observation", text: task.id }, { type: "assistant", text: "done" }]
+    };
+  };
+  const operationalAdapter = {
+    ...adapter,
+    score: ({ prediction }) => ({
+      score: {
+        schema: "wikiskill.operational-outcome.v1",
+        eligible: true,
+        terminalSuccess: prediction.terminalSuccess,
+        verifiedMilestones: prediction.verifiedMilestones,
+        highestVerifiedMilestone: prediction.verifiedMilestones.length - 1,
+        verifiedMilestoneCount: prediction.verifiedMilestones.length,
+        actionableBlockersRemoved: 0,
+        unauthorizedWrites: 0,
+        unrecoveredUserChanges: 0,
+        diagnosisVerifierPassed: true
+      },
+      evidence: { source: "test-harness" }
+    })
+  };
+  const result = await evolveWorkspace(workspace, "target-skill", {
+    datasetPath,
+    provider: "claude",
+    modelId: "test-model",
+    scorerRef: "scorer:operational-test",
+    stateRoot,
+    runId: "operational-regression-audit",
+    adapter: operationalAdapter,
+    runner: operationalRunner,
+    maintainer,
+    proposer,
+    model: { id: "test-model" },
+    iterationLimit: 1
+  });
+  assert.equal(result.candidate, null);
+  assert.equal(result.state.candidateBlockedReason, "heldout_operational_regression");
+
+  const { sortedFiles, treeDigest } = require("../src/evolution");
+  const manifest = JSON.parse(await fs.readFile(path.join(result.runRoot, "manifest.json"), "utf8"));
+  const targetSkill = "target-skill";
+  const source = path.join(result.runRoot, "result", "skills", targetSkill);
+  const snapshotRoot = path.join(result.runRoot, "skills", "snapshots", targetSkill);
+  const workspaceOnly = new Set(manifest.workspaceOnlyFiles?.[targetSkill] || []);
+  const baselineDigest = treeDigest(snapshotRoot, sortedFiles(snapshotRoot).filter((file) => !workspaceOnly.has(path.relative(snapshotRoot, file).split(path.sep).join("/"))));
+  const resultDigest = treeDigest(source);
+  const candidateId = `candidate-${crypto.createHash("sha256").update(`${targetSkill}\0${baselineDigest}\0${resultDigest}`).digest("hex").slice(0, 24)}`;
+  const candidateRoot = path.join(workspace, ".wikiskill", "candidates", candidateId);
+  await fs.mkdir(candidateRoot, { recursive: true });
+  fsSync.cpSync(source, path.join(candidateRoot, "skill"), { recursive: true });
+  await fs.writeFile(path.join(candidateRoot, "candidate.json"), `${JSON.stringify({
+    schema: "wikiskill.candidate.v1",
+    candidateId,
+    targetSkill,
+    status: "validation_accepted",
+    baselineDigest,
+    resultDigest,
+    runId: "operational-regression-audit",
+    baselineValidationScore: result.state.baselineValidationScore,
+    candidateValidationScore: result.state.bestValidationScore,
+    testScore: result.state.testScore,
+    acceptedIterations: result.state.acceptedIterations,
+    configDigest: manifest.configDigest,
+    frozenComponents: manifest.frozenComponents
+  }, null, 2)}\n`);
+
+  const audited = auditRun(result.runRoot, { workspace, candidate: candidateId });
+  assert.deepEqual(audited.blockers, ["Candidate run has a held-out operational regression and must not be published."]);
+  assert.equal(audited.data.candidate.candidateId, candidateId);
 });
 
 test("terminal operational baseline reports dataset saturation without learning", async () => {

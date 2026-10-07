@@ -17,7 +17,7 @@ wikiskill experiment prepare --workspace <workspace> --target <skill-id> --datas
 wikiskill experiment audit --dataset <dataset.json> --target <skill-id> [--skill-context <context.json>] [--baseline <baseline.json>] [--mode publishable|smoke] [--empty] --json
 wikiskill experiment audit --experiment <experiment.json> --json
 wikiskill experiment run --workspace <workspace> --target <skill-id> --dataset <dataset.json> --scorer <ref> [--runtime-profile <profile.json> | --provider codex|claude --model <id> --reasoning-effort <level> --tool-profile none|workspace --iterations <K> --max-provider-launches <count>] [--empty] [--run-id <id>] --json-events
-wikiskill run audit --run-root <run-root> --workspace <workspace> --json
+wikiskill run audit --run-root <run-root> --workspace <workspace> [--candidate <id>] --json
 wikiskill bootstrap install|uninstall --workspace <repo> --command <context-command> [--dry-run] --json
 wikiskill dataset validate --dataset <dataset.json> --scorer <ref> --json
 wikiskill dataset compile-commit --input <source.json> --provider codex|claude --model <id> --reasoning-effort <level> --json
@@ -315,7 +315,7 @@ async function execute(argv, io = { stdout: process.stdout.write.bind(process.st
       return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve every blocker, then rerun the canonical dataset validation and experiment audit."] : []), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "run") {
       if (options.subcommand !== "audit" || !options.runRoot || !options.workspace) throw new Error("run audit requires --run-root and --workspace.");
-      const result = require("./audit/run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace) });
+      const result = require("./audit/run").auditRun(path.resolve(options.runRoot), { workspace: path.resolve(options.workspace), ...(options.candidate ? { candidate: options.candidate } : {}) });
       data = { schema: "wikiskill.run-audit.v1", ...result.data };
       return output(core.ENVELOPE(data, result.warnings, result.blockers, result.blockers.length ? ["Resolve the run evidence blockers before candidate publication."] : []), result.blockers.length ? 1 : 0, io);
     } else if (options.command === "bootstrap") {
