@@ -1,0 +1,45 @@
+src/audit/run.js
+  s_8e30598a97753a::t_12b3f4ed980dd6 256-258,265
+  s_c9eea52eedf5b2::t_f98a09004502dd 237-242
+  s_8e30598a97753a::t_ff96d2a9eb402c 78
+  s_8e30598a97753a::t_df0a3025250a72 283-289,294,309,330,359,366
+  s_c9eea52eedf5b2::t_1bad50c9fe3999 22-24,32,37-63
+  s_c9eea52eedf5b2::t_5bcfb193c01d47 280-281,295-308,310-329,331-358,360-365,367-371
+  s_8e30598a97753a::t_979bbd2abb671b 11,18-21,25-31,33-36,64-77,79-83
+  s_c9eea52eedf5b2::t_5609dce0ed44ae 8
+  s_8e30598a97753a::t_74b299aa9e49d2 200-201
+  s_c9eea52eedf5b2::t_226eedc5d384ad 282,290-293
+test/meta-skill.test.js
+  s_8e30598a97753a::t_5067f30657b1ca 257
+test/evolution.test.js
+  s_8e30598a97753a::t_fd034f3994ed6b 452-525,527-570,573-576,814-894
+  s_c9eea52eedf5b2::t_f3ad40883949e5 5,13-14
+  s_c9eea52eedf5b2::t_f52ec9762a19b2 526
+  s_c9eea52eedf5b2::t_f50250bcf01768 577-664,674-813
+  s_c9eea52eedf5b2::t_388ba68221c94e 571-572
+  s_c9eea52eedf5b2::t_a3d68d609d62d5 665-673
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7730f28e00de3ae8498124a4e6bf1b7615a480e8",
+  "prompts": {},
+  "sessions": {
+    "s_8e30598a97753a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "10f813da-444f-446c-86c3-6f650efca3f4",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    },
+    "s_c9eea52eedf5b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4d847167-a226-45ca-9062-90295b8e7227",
+        "model": "glm-5.3"
+      },
+      "human_author": "yulintao3 <yulintao3@jd.com>"
+    }
+  }
+}
