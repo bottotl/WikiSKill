@@ -1,6 +1,6 @@
 {
   "name": "@jd/jft0m-wikiskill",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standalone WikiSkill evolution engine",
   "type": "commonjs",
   "main": "./src/standalone-client.js",
